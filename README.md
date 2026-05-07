@@ -1,10 +1,10 @@
-# 📡 NMP-SDN QoE-Based Adaptive Routing System
+# NMP-SDN QoE-Based Adaptive Routing System
 
 This project integrates **Mininet + ONOS + MATLAB** to simulate an SDN environment with real-time QoE monitoring and adaptive routing based on network conditions.
 
 ---
 
-## 🚀 Overview
+## Overview
 
 The system dynamically:
 - Measures network metrics (delay, jitter, packet loss)
