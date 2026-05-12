@@ -23,19 +23,22 @@ class QoETopo(Topo):
         self.addLink(s4, h2)
 
         # --- Two paths between s1 and s4 (shared with background traffic) ---
-        self.addLink(s1, s2)        # Path A: s1 → s2 → s4
-        self.addLink(s2, s4)
-        self.addLink(s1, s3)        # Path B: s1 → s3 → s4
-        self.addLink(s3, s4)
+        # Bandwidth limited to 10 Mbps so iperf background traffic can saturate them
+        self.addLink(s1, s2, bw=10)     # Path A: s1 → s2 → s4
+        self.addLink(s2, s4, bw=10)
+        self.addLink(s1, s3, bw=10)     # Path B: s1 → s3 → s4
+        self.addLink(s3, s4, bw=10)
 
         # --- Background hosts connect to aggregation switches ---
         # h3, h4 on the left (s1); h5, h6 on the right (s4)
         # Their iperf traffic traverses s1→s2→s4 or s1→s3→s4,
         # competing with the h1→h2 priority flow
-        self.addLink(h3, s1)
-        self.addLink(h4, s1)
-        self.addLink(h5, s4)
-        self.addLink(h6, s4)
+        # Host links are 100 Mbps so they don't become the bottleneck
+        self.addLink(h3, s1, bw=100)
+        self.addLink(h4, s1, bw=100)
+        self.addLink(h5, s4, bw=100)
+        self.addLink(h6, s4, bw=100)
 
 # Register topology so Mininet can load it by name
 topos = {'qoe': (lambda: QoETopo())}
+
