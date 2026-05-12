@@ -24,7 +24,7 @@ S1_ID       = 'of:0000000000000001';
 PORT_PATH_A = '2';
  
 % --- QoE ---
-QOE_THRESHOLD = 0.5;
+QOE_THRESHOLD = 0.998;
 COOLDOWN_S    = 30;     % increased to allow ONOS convergence after rerouting
  
 % --- Plot settings ---
@@ -229,10 +229,12 @@ while true
         % Skip port stats if ONOS call fails
     end
  
-    % Draw rerouting markers on ax1 and ax2
-    for rt = reroute_times
-        xline(ax1, rt, '--k', 'Alpha', 0.4);
-        xline(ax2, rt, '--k', 'Alpha', 0.4);
+    % Draw rerouting markers on ax1 and ax2 (only new ones, excluded from legend)
+    if ~isempty(reroute_times)
+        xl1 = xline(ax1, reroute_times(end), '--k', 'Alpha', 0.4);
+        xl1.Annotation.LegendInformation.IconDisplayStyle = 'off';
+        xl2 = xline(ax2, reroute_times(end), '--k', 'Alpha', 0.4);
+        xl2.Annotation.LegendInformation.IconDisplayStyle = 'off';
     end
  
     drawnow limitrate;
