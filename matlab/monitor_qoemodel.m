@@ -24,7 +24,7 @@ S1_ID       = 'of:0000000000000001';
 PORT_PATH_A = '2';
  
 % --- QoE ---
-QOE_THRESHOLD = 0.998;
+QOE_THRESHOLD = 0.5;
 COOLDOWN_S    = 30;     % increased to allow ONOS convergence after rerouting
  
 % --- Plot settings ---
@@ -243,33 +243,37 @@ while true
     now_unix    = posixtime(datetime('now'));
     cooldown_ok = (now_unix - last_reroute) > COOLDOWN_S;
  
-    if QoE < QOE_THRESHOLD && ~path_degraded && cooldown_ok
-        fprintf('\n>>> QoE=%.3f < %.2f — Switching to Path B (disabling port %s on %s)...\n', ...
-                QoE, QOE_THRESHOLD, PORT_PATH_A, S1_ID);
+    if QoE < QOE_THRESHOLD && cooldown_ok
+        if ~path_degraded
+            % QoE degraded on Path A → switch to Path B
+            fprintf('\n>>> QoE=%.3f < %.3f — Switching to Path B (disabling port %s on %s)...\n', ...
+                    QoE, QOE_THRESHOLD, PORT_PATH_A, S1_ID);
  
-        ok = onos_set_port(ONOS_BASE, S1_ID, PORT_PATH_A, false, opts_post);
-        if ok
-            flush_flows(ONOS_BASE, ONOS_USER, ONOS_PASS, opts_get);
-            path_degraded = true;
-            last_reroute  = now_unix;
-            reroute_times(end+1) = t_now; %#ok<AGROW>
-            fprintf('>>> Path B active. Flows flushed — ONOS recomputing...\n\n');
+            ok = onos_set_port(ONOS_BASE, S1_ID, PORT_PATH_A, false, opts_post);
+            if ok
+                flush_flows(ONOS_BASE, ONOS_USER, ONOS_PASS, opts_get);
+                path_degraded = true;
+                last_reroute  = now_unix;
+                reroute_times(end+1) = t_now; %#ok<AGROW>
+                fprintf('>>> Path B active. Flows flushed — ONOS recomputing...\n\n');
+            else
+                fprintf('[ERROR] Could not disable port. Retrying next cycle.\n\n');
+            end
+ 
         else
-            fprintf('[ERROR] Could not disable port. Retrying next cycle.\n\n');
-        end
+            % QoE still degraded on Path B → switch back to Path A
+            fprintf('\n>>> QoE=%.3f still low on Path B — switching back to Path A...\n', QoE);
  
-    elseif QoE >= QOE_THRESHOLD && path_degraded && cooldown_ok
-        fprintf('\n>>> QoE=%.3f recovered — Restoring Path A...\n', QoE);
- 
-        ok = onos_set_port(ONOS_BASE, S1_ID, PORT_PATH_A, true, opts_post);
-        if ok
-            flush_flows(ONOS_BASE, ONOS_USER, ONOS_PASS, opts_get);
-            path_degraded = false;
-            last_reroute  = now_unix;
-            reroute_times(end+1) = t_now; %#ok<AGROW>
-            fprintf('>>> Path A restored. Flows flushed — ONOS recomputing...\n\n');
-        else
-            fprintf('[ERROR] Could not re-enable port.\n\n');
+            ok = onos_set_port(ONOS_BASE, S1_ID, PORT_PATH_A, true, opts_post);
+            if ok
+                flush_flows(ONOS_BASE, ONOS_USER, ONOS_PASS, opts_get);
+                path_degraded = false;
+                last_reroute  = now_unix;
+                reroute_times(end+1) = t_now; %#ok<AGROW>
+                fprintf('>>> Path A restored. Flows flushed — ONOS recomputing...\n\n');
+            else
+                fprintf('[ERROR] Could not re-enable port.\n\n');
+            end
         end
     end
 end
