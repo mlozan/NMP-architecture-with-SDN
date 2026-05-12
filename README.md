@@ -53,8 +53,9 @@ onosproject/onos:2.7.0
 
 ## 🔐 3. Access ONOS CLI
 ```bash
-ssh-keygen -f "/home/user/.ssh/known_hosts" -R "[localhost]:8101"
-ssh -p 8101 onos@localhost
+ssh -o HostKeyAlgorithms=+ssh-rsa \
+-o PubkeyAcceptedAlgorithms=+ssh-rsa \
+-p 8101 onos@localhost
 ```
 
 ## 📦 4. Activate ONOS Applications
