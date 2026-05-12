@@ -25,7 +25,7 @@ PORT_PATH_A = '2';
  
 % --- QoE ---
 QOE_THRESHOLD = 0.998;
-COOLDOWN_S    = 4;     % increased to allow ONOS convergence after rerouting
+COOLDOWN_S    = 30;     % increased to allow ONOS convergence after rerouting
  
 % --- Plot settings ---
 PLOT_WINDOW = 60;   % seconds of history shown in the plots
