@@ -42,6 +42,8 @@ sudo docker pull onosproject/onos:2.7.0
 
 sudo docker run onosproject/onos
 
+sudo docker start onos
+
 sudo docker run -d --name onos \
 -p 8181:8181 \
 -p 6653:6653 \
