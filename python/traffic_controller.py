@@ -87,5 +87,4 @@ def run_phases(net):
 # --- Entry point when called from Mininet CLI ---
 # mininet> py exec(open('/path/to/traffic_controller.py').read())
 # This makes run_phases(net) available to call immediately after
-print("[traffic] Script loaded. Run: run_phases(net)")
-print("[traffic] Or manually: start_servers(net) then run_phases(net)")
+run_phases(net)
