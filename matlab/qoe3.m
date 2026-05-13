@@ -5,40 +5,31 @@ disp("Waiting for metrics...");
 % Maximum degradation reference value for QoE normalization
 L_base = 40;
 
-
 % ONOS REST API base URL
 onos_base = "http://192.168.56.101:8181/onos/v1";
 
 % s1 device ID and port towards s2 (Path A)
 s1_id   = "of:0000000000000001";
-port_s2 = "2";  % s1-eth2 → s2 (Path A)
+port_s2 = "2";
 
-% Web options
+% Web options for GET requests
 options_get = weboptions( ...
     'Username','onos', ...
     'Password','rocks', ...
     'MediaType','application/json', ...
     'RequestMethod','get');
 
-options_delete = weboptions( ...
-    'Username','onos', ...
-    'Password','rocks', ...
-    'MediaType','application/json', ...
-    'RequestMethod','delete');
-
-% Track current state to avoid redundant calls
+% Track current path state
 path_degraded = false;
 
 while true
     if u.NumDatagramsAvailable > 0
 
-        % Read one datagram as raw bytes
+        % Read and parse UDP packet: "delay jitter loss"
         datagram = read(u, 1, "uint8");
-        rawBytes = datagram.Data;
-        data     = strtrim(char(rawBytes));
-
-        % Parse: "delay jitter loss"
+        data = strtrim(char(datagram.Data));
         v = str2double(split(string(data)));
+
         if numel(v) < 3 || any(isnan(v))
             disp("Invalid packet");
             continue;
@@ -48,66 +39,36 @@ while true
         jitter = v(2);
         loss   = v(3);
 
-        % Weighted degradation score
-        D   = delay + 1*jitter + 200*loss;
+        % Calculate QoE (0=bad, 1=perfect)
+        D   = delay + jitter + 200*loss;
         QoE = max(0, 1 - D/L_base);
 
         fprintf("Delay=%.3f ms | Jitter=%.3f ms | Loss=%.0f%% | QoE=%.3f\n", ...
                 delay, jitter, loss*100, QoE);
 
+        % --- QoE degraded: disable Path A, ONOS will use Path B ---
         if QoE < 0.7 && ~path_degraded
-            % QoE dropped → disable Path A, force Path B
-            disp("LOW QoE → Disabling Path A (s1->s2), rerouting via s3...");
+            disp("LOW QoE → Disabling Path A, rerouting via Path B...");
 
-            cmd_disable = sprintf( ...
-                'curl -s -u onos:rocks -X POST -H "Content-Type: application/json" -d "{\"enabled\":false}" http://192.168.56.101:8181/onos/v1/devices/%s/portstate/%s', ...
-                s1_id, port_s2);
-            system(cmd_disable);
-
-            % Flush flows so ONOS recomputes via Path B
-            try
-                devices = webread(onos_base + "/devices", options_get);
-                for i = 1:numel(devices.devices)
-                    deviceId = devices.devices(i).id;
-                    cmd_flush = sprintf( ...
-                        'curl -s -u onos:rocks -X DELETE http://192.168.56.101:8181/onos/v1/flows/%s', ...
-                        deviceId);
-                    system(cmd_flush);
-                    fprintf("Flows flushed for device: %s\n", deviceId);
-                end
-                disp("All flows flushed → ONOS recomputing via Path B...");
-            catch e
-                fprintf("ONOS call failed: %s\n", e.message);
-            end
+            % Disable port s1 → s2
+            system(sprintf( ...
+                'curl -s -u onos:rocks -X POST -H "Content-Type: application/json" -d "{\\"enabled\\":\\"false\\"}" %s/devices/%s/portstate/%s', ...
+                onos_base, s1_id, port_s2));
 
             path_degraded = true;
+            disp("Path A disabled → ONOS now routes via Path B");
 
+        % --- QoE recovered: re-enable Path A ---
         elseif QoE >= 0.7 && path_degraded
-            % QoE recovered → re-enable Path A
-            disp("QoE recovered → Re-enabling Path A (s1->s2)...");
+            disp("QoE recovered → Re-enabling Path A...");
 
-            cmd_enable = sprintf( ...
-                'curl -s -u onos:rocks -X POST -H "Content-Type: application/json" -d "{\"enabled\":true}" http://192.168.56.101:8181/onos/v1/devices/%s/portstate/%s', ...
-                s1_id, port_s2);
-            system(cmd_enable);
-
-            % Flush flows so ONOS recomputes freely
-            try
-                devices = webread(onos_base + "/devices", options_get);
-                for i = 1:numel(devices.devices)
-                    deviceId = devices.devices(i).id;
-                    cmd_flush = sprintf( ...
-                        'curl -s -u onos:rocks -X DELETE http://192.168.56.101:8181/onos/v1/flows/%s', ...
-                        deviceId);
-                    system(cmd_flush);
-                    fprintf("Flows flushed for device: %s\n", deviceId);
-                end
-                disp("Path A restored → ONOS recomputing...");
-            catch e
-                fprintf("ONOS call failed: %s\n", e.message);
-            end
+            % Re-enable port s1 → s2
+            system(sprintf( ...
+                'curl -s -u onos:rocks -X POST -H "Content-Type: application/json" -d "{\\"enabled\\":\\"true\\"}" %s/devices/%s/portstate/%s', ...
+                onos_base, s1_id, port_s2));
 
             path_degraded = false;
+            disp("Path A restored → ONOS can use both paths again");
         end
 
     end
