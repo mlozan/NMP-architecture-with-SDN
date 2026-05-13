@@ -4,6 +4,13 @@ traffic_controller.py — run from a VM terminal (NOT from Mininet CLI)
 Uses mnexec to run iperf commands inside Mininet host namespaces.
 Also sets up QoS rules via ovs-ofctl/ovs-vsctl before starting traffic.
 
+QoE model used:  D = delay_ms + 1*jitter_ms + 200*loss_frac
+                 QoE = max(0, 1 - D / L_max)
+
+Target: QoE <= 0.6 during heavy congestion phases.
+Strategy: flood Path A with ~19 Mbps (190% of 10 Mbps link) to force
+          deep queues, high delay/jitter and packet loss on that path.
+
 Usage:
     sudo python3 traffic_controller.py
 
@@ -21,18 +28,28 @@ H5_IP = "10.0.0.5"
 H6_IP = "10.0.0.6"
 DURATION = 99999
 
-LINK_BW  = 10_000_000   # 10 Mbps in bps
-HIGH_BW  =  9_000_000   #  9 Mbps guaranteed for priority traffic
+LINK_BW = 10_000_000   # 10 Mbps — physical link capacity
+HIGH_BW  = 1_000_000   # 1 Mbps guaranteed for priority traffic (was 9M)
+                        # Keeping it low so priority traffic still suffers
+                        # under heavy congestion -> QoE drops below 0.6
 
-# Congestion phases: (label, bw_h3, bw_h4, duration_seconds)
+# ---------------------------------------------------------------------------
+# Congestion phases
+# Each phase: (label, bw_h3, bw_h4, duration_seconds)
+#
+# Rationale for bandwidths:
+#   - "Light"  :  3M + 3M =  6M  ->  60% link util  -> mild delay
+#   - "Medium" :  5M + 5M = 10M  -> 100% link util  -> queues start building
+#   - "Heavy"  : 9.5M+9.5M= 19M  -> 190% link util  -> deep queues, loss, QoE<=0.6
+# ---------------------------------------------------------------------------
 PHASES = [
     ("No congestion",     "0M",    "0M",    30),
     ("Light congestion",  "3M",    "3M",    60),
-    ("Medium congestion", "4M",    "4M",    60),
-    ("Heavy congestion",  "4.5M",  "4.5M",  60),
+    ("Medium congestion", "5M",    "5M",    60),
+    ("Heavy congestion",  "9.5M",  "9.5M",  60),
     ("No congestion",     "0M",    "0M",    30),
-    ("Medium congestion", "4M",    "4M",    60),
-    ("Heavy congestion",  "4.5M",  "4.5M",  60),
+    ("Medium congestion", "5M",    "5M",    60),
+    ("Heavy congestion",  "9.5M",  "9.5M",  60),
     ("No congestion",     "0M",    "0M",    30),
 ]
 
@@ -51,33 +68,29 @@ def run_cmd(cmd, check=True):
 
 def setup_qos():
     """
-    Mirrors qos_setup.sh:
-      1. Force background traffic (DSCP 0) through Path A (s1→s2).
-      2. Create HTB QoS queues on s1-eth2 and s2-eth2.
-      3. Map DSCP 46 → Queue 0 (high priority) and DSCP 0 → Queue 1 (low priority).
+    Sets up HTB QoS queues and OpenFlow rules:
+      - DSCP 46 (tos=184) -> Queue 0: HIGH_BW guaranteed (priority traffic)
+      - DSCP  0 (tos=0)   -> Queue 1: best-effort, forced via Path A (s1->s2)
+    With HIGH_BW=1Mbps and background at 190% link load, priority traffic
+    will experience significant delay/jitter/loss -> QoE drops below 0.6.
     """
     print("=== QoS Setup for Mininet QoE Topology ===\n")
 
-    # ------------------------------------------------------------------
-    # Step 1: Force background traffic through Path A (s1→s2)
-    # ------------------------------------------------------------------
-    print("[1/3] Forcing background traffic through Path A (s1→s2)...")
+    # --- Step 1: Force background traffic through Path A ---
+    print("[1/3] Forcing background traffic through Path A (s1->s2)...")
     run_cmd("ovs-ofctl add-flow s1 'priority=100,ip,nw_tos=0,actions=set_queue:1,output:2'")
-    print("      Background traffic (DSCP 0) locked to s1→s2")
-    print("      Path B (s1→s3) stays free for rerouting\n")
+    print("      Background traffic (DSCP 0) locked to s1->s2")
+    print("      Path B (s1->s3) stays free for rerouting\n")
 
-    # ------------------------------------------------------------------
-    # Step 2: Create QoS queues on s1-eth2 and s2-eth2
-    # ------------------------------------------------------------------
+    # --- Step 2: Create QoS queues ---
     print("[2/3] Creating QoS queues...")
 
-    # Clean existing QoS/Queue objects
     run_cmd("ovs-vsctl clear port s1-eth2 qos", check=False)
     run_cmd("ovs-vsctl clear port s2-eth2 qos", check=False)
     run_cmd("ovs-vsctl --all destroy QoS",       check=False)
     run_cmd("ovs-vsctl --all destroy Queue",     check=False)
 
-    # --- s1-eth2 ---
+    # s1-eth2
     q0_s1  = run_cmd(f"ovs-vsctl create Queue "
                      f"other-config:min-rate={HIGH_BW} "
                      f"other-config:max-rate={LINK_BW}")
@@ -88,9 +101,9 @@ def setup_qos():
                      f"queues:0={q0_s1} queues:1={q1_s1} "
                      f"other-config:max-rate={LINK_BW}")
     run_cmd(f"ovs-vsctl set port s1-eth2 qos={qos_s1}")
-    print("      s1-eth2: Q0=high priority (9 Mbps), Q1=low priority")
+    print(f"      s1-eth2: Q0=priority ({HIGH_BW//1_000_000} Mbps min), Q1=best-effort")
 
-    # --- s2-eth2 ---
+    # s2-eth2
     q0_s2  = run_cmd(f"ovs-vsctl create Queue "
                      f"other-config:min-rate={HIGH_BW} "
                      f"other-config:max-rate={LINK_BW}")
@@ -101,34 +114,24 @@ def setup_qos():
                      f"queues:0={q0_s2} queues:1={q1_s2} "
                      f"other-config:max-rate={LINK_BW}")
     run_cmd(f"ovs-vsctl set port s2-eth2 qos={qos_s2}")
-    print("      s2-eth2: Q0=high priority (9 Mbps), Q1=low priority\n")
+    print(f"      s2-eth2: Q0=priority ({HIGH_BW//1_000_000} Mbps min), Q1=best-effort\n")
 
-    # ------------------------------------------------------------------
-    # Step 3: Map DSCP → queues via OpenFlow rules
-    # ------------------------------------------------------------------
-    print("[3/3] Mapping DSCP → queues...")
-
-    # s1: DSCP 46 (tos=184) → Queue 0, normal forwarding
+    # --- Step 3: Map DSCP -> queues ---
+    print("[3/3] Mapping DSCP -> queues...")
     run_cmd("ovs-ofctl add-flow s1 'priority=200,ip,nw_tos=184,actions=set_queue:0,normal'")
-    # s1: DSCP 0  (tos=0)   → Queue 1, forced via port 2 (s2)
     run_cmd("ovs-ofctl add-flow s1 'priority=100,ip,nw_tos=0,actions=set_queue:1,output:2'")
-    # s2: DSCP 46 → Queue 0
     run_cmd("ovs-ofctl add-flow s2 'priority=200,ip,nw_tos=184,actions=set_queue:0,normal'")
-    # s2: DSCP 0  → Queue 1
     run_cmd("ovs-ofctl add-flow s2 'priority=100,ip,nw_tos=0,actions=set_queue:1,normal'")
-
-    print("      DSCP 46 (tos=184) → Queue 0 (9 Mbps guaranteed)")
-    print("      DSCP 0  (tos=0)   → Queue 1 (dropped first under congestion)\n")
+    print(f"      DSCP 46 (tos=184) -> Queue 0 ({HIGH_BW//1_000_000} Mbps guaranteed)")
+    print("      DSCP  0 (tos=0)   -> Queue 1 (best-effort, dropped first)\n")
 
     print("=== QoS Setup Complete ===\n")
-    print("Background traffic : always via Path A (s1→s2→s4), saturates the link")
-    print("Priority traffic   : via Path A initially, MATLAB reroutes to Path B when QoE drops")
-    print("Path B             : free and available for rerouting\n")
+    print(f"  Link capacity  : {LINK_BW//1_000_000} Mbps")
+    print(f"  Priority quota : {HIGH_BW//1_000_000} Mbps  <- reduced to stress QoE")
+    print(f"  Heavy phase BW : 19 Mbps (190% of link) <- forces loss + delay\n")
     print("Verify with:")
     print("  ovs-ofctl dump-flows s1")
     print("  ovs-vsctl list QoS\n")
-    print("Undo with:")
-    print("  sudo bash qos_teardown.sh\n")
 
 # ---------------------------------------------------------------------------
 # Mininet host helpers
@@ -145,7 +148,6 @@ def get_pid(host_name):
         pid = lines[0].strip()
         if pid:
             return pid
-        # Fallback: try finding via ip netns
         result2 = subprocess.run(
             ['ip', 'netns', 'pids', host_name],
             capture_output=True, text=True
@@ -155,14 +157,12 @@ def get_pid(host_name):
     except Exception:
         return None
 
-
 def run_in_host(host_name, cmd, background=False):
     """Run a command inside a Mininet host namespace using mnexec."""
     pid = get_pid(host_name)
     if not pid:
         print(f"[ERROR] Could not find PID for {host_name}")
         return
-
     full_cmd = f"mnexec -a {pid} {cmd}"
     if background:
         full_cmd += " &"
@@ -182,7 +182,6 @@ def kill_iperf_clients():
             os.system(f"mnexec -a {pid} pkill -f iperf 2>/dev/null")
     print("[traffic] iperf clients stopped.")
 
-
 def start_servers():
     """Start iperf UDP servers on h5 and h6."""
     print("[traffic] Starting iperf servers on h5 and h6...")
@@ -195,7 +194,6 @@ def start_servers():
             print(f"[ERROR] Could not find {host}")
     time.sleep(1)
     print("[traffic] Servers ready.")
-
 
 def start_clients(bw_h3, bw_h4):
     """Start iperf UDP clients on h3 and h4."""
@@ -213,18 +211,19 @@ def start_clients(bw_h3, bw_h4):
 def run_phases():
     start_servers()
     print("\n[traffic] Starting congestion cycle...\n")
-    print(f"{'Phase':<25} {'Load':<12} {'Duration':>8}")
-    print("-" * 50)
+    print(f"{'Phase':<25} {'Load':<16} {'Duration':>8}")
+    print("-" * 55)
 
     for label, bw_h3, bw_h4, duration in PHASES:
         kill_iperf_clients()
         time.sleep(0.5)
 
         if bw_h3 == "0M":
-            print(f"[{label:<23}]  {'idle':<12}  {duration:>5}s")
+            print(f"[{label:<23}]  {'idle':<16}  {duration:>5}s")
         else:
             total = float(bw_h3[:-1]) + float(bw_h4[:-1])
-            print(f"[{label:<23}]  {total:.1f}M/10M      {duration:>5}s")
+            pct   = int(total / (LINK_BW / 1_000_000) * 100)
+            print(f"[{label:<23}]  {total:.1f}M/10M ({pct:>3}%)  {duration:>5}s")
             start_clients(bw_h3, bw_h4)
 
         for remaining in range(duration, 0, -10):
@@ -240,5 +239,5 @@ if __name__ == "__main__":
         print("[ERROR] Run as root: sudo python3 traffic_controller.py")
         exit(1)
 
-    setup_qos()   # <-- QoS rules applied before any traffic starts
+    setup_qos()
     run_phases()
