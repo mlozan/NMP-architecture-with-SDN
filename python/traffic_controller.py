@@ -1,97 +1,124 @@
 #!/usr/bin/env python3
 """
-traffic_controller.py — run from the Mininet CLI
-Automatically cycles through congestion phases to test QoE-based rerouting.
-Starts iperf servers on h5/h6, then alternates between congestion levels.
-
-Usage (from Mininet CLI):
-    mininet> py exec(open('/path/to/traffic_controller.py').read())
+traffic_controller.py — run from a VM terminal (NOT from Mininet CLI)
+Uses mnexec to run iperf commands inside Mininet host namespaces.
+ 
+Usage:
+    sudo python3 traffic_controller.py
+ 
+Requirements:
+    - Mininet must already be running with topo_qoe
+    - Run as root (sudo)
 """
-
-import time
+ 
 import subprocess
-
+import time
+import os
+ 
 # --- Configuration ---
 H5_IP = "10.0.0.5"
 H6_IP = "10.0.0.6"
-DURATION = 99999  # iperf duration (killed manually between phases)
-
+DURATION = 99999
+ 
 # Congestion phases: (label, bw_h3, bw_h4, duration_seconds)
-# Total load = bw_h3 + bw_h4 on the shared 10Mbps links
 PHASES = [
-    ("No congestion",      "0M",    "0M",    30),   # baseline — no background traffic
-    ("Light congestion",   "3M",    "3M",    60),   # 6M/10M — mild QoE degradation
-    ("Medium congestion",  "4M",    "4M",    60),   # 8M/10M — noticeable degradation
-    ("Heavy congestion",   "4.5M",  "4.5M",  60),   # 9M/10M — should trigger rerouting
-    ("No congestion",      "0M",    "0M",    30),   # recovery period
-    ("Medium congestion",  "4M",    "4M",    60),   # repeat medium
-    ("Heavy congestion",   "4.5M",  "4.5M",  60),   # repeat heavy
-    ("No congestion",      "0M",    "0M",    30),   # final recovery
+    ("No congestion",     "0M",    "0M",    30),
+    ("Light congestion",  "3M",    "3M",    60),
+    ("Medium congestion", "4M",    "4M",    60),
+    ("Heavy congestion",  "4.5M",  "4.5M",  60),
+    ("No congestion",     "0M",    "0M",    30),
+    ("Medium congestion", "4M",    "4M",    60),
+    ("Heavy congestion",  "4.5M",  "4.5M",  60),
+    ("No congestion",     "0M",    "0M",    30),
 ]
-
-
-def run_on_host(net, host_name, cmd):
-    """Run a command on a Mininet host."""
-    host = net.get(host_name)
-    host.cmd(cmd)
-
-
-def kill_iperf(net):
-    """Kill all iperf client processes on h3 and h4."""
-    for h in ['h3', 'h4']:
-        net.get(h).cmd('kill %iperf 2>/dev/null; pkill -f iperf 2>/dev/null')
-
-
-def start_servers(net):
+ 
+def get_pid(host_name):
+    """Get the PID of a Mininet host process to use with mnexec."""
+    try:
+        result = subprocess.run(
+            ['grep', '-r', host_name, '/var/run/mn/'],
+            capture_output=True, text=True
+        )
+        # Try finding via ps
+        result = subprocess.run(
+            ['pgrep', '-f', f'mininet:{host_name}'],
+            capture_output=True, text=True
+        )
+        pid = result.stdout.strip().split('\n')[0]
+        return pid
+    except:
+        return None
+ 
+def run_in_host(host_name, cmd, background=False):
+    """Run a command inside a Mininet host namespace using mnexec."""
+    pid = get_pid(host_name)
+    if not pid:
+        print(f"[ERROR] Could not find PID for {host_name}")
+        return
+    
+    full_cmd = f"mnexec -a {pid} {cmd}"
+    if background:
+        full_cmd += " &"
+        os.system(full_cmd)
+    else:
+        subprocess.run(full_cmd, shell=True, capture_output=True)
+ 
+def kill_iperf_clients():
+    """Kill iperf clients on h3 and h4."""
+    for host in ['h3', 'h4']:
+        pid = get_pid(host)
+        if pid:
+            os.system(f"mnexec -a {pid} pkill -f iperf 2>/dev/null")
+    print("[traffic] iperf clients stopped.")
+ 
+def start_servers():
     """Start iperf UDP servers on h5 and h6."""
     print("[traffic] Starting iperf servers on h5 and h6...")
-    net.get('h5').cmd('pkill iperf 2>/dev/null; iperf -s -u -D')
-    net.get('h6').cmd('pkill iperf 2>/dev/null; iperf -s -u -D')
+    for host, ip in [('h5', H5_IP), ('h6', H6_IP)]:
+        pid = get_pid(host)
+        if pid:
+            os.system(f"mnexec -a {pid} pkill iperf 2>/dev/null")
+            os.system(f"mnexec -a {pid} iperf -s -u -D")
+        else:
+            print(f"[ERROR] Could not find {host}")
     time.sleep(1)
     print("[traffic] Servers ready.")
-
-
-def run_phases(net):
-    """Cycle through congestion phases."""
-    start_servers(net)
-
+ 
+def start_clients(bw_h3, bw_h4):
+    """Start iperf UDP clients on h3 and h4."""
+    pid_h3 = get_pid('h3')
+    pid_h4 = get_pid('h4')
+    if pid_h3:
+        os.system(f"mnexec -a {pid_h3} iperf -c {H5_IP} -u -b {bw_h3} -t {DURATION} &")
+    if pid_h4:
+        os.system(f"mnexec -a {pid_h4} iperf -c {H6_IP} -u -b {bw_h4} -t {DURATION} &")
+ 
+def run_phases():
+    start_servers()
     print("\n[traffic] Starting congestion cycle...\n")
     print(f"{'Phase':<25} {'Load':<12} {'Duration':>8}")
-    print("-" * 48)
-
+    print("-" * 50)
+ 
     for label, bw_h3, bw_h4, duration in PHASES:
-        # Kill any existing iperf clients first
-        kill_iperf(net)
+        kill_iperf_clients()
         time.sleep(0.5)
-
+ 
         if bw_h3 == "0M":
-            print(f"[{label:<23}]  {'idle':<12}  {duration:>5}s  — no background traffic")
+            print(f"[{label:<23}]  {'idle':<12}  {duration:>5}s")
         else:
-            total_bw = int(bw_h3[:-1]) + int(bw_h4[:-1])
-            print(f"[{label:<23}]  {total_bw}M/10M total  {duration:>5}s")
-
-            # Start iperf clients
-            net.get('h3').cmd(f'iperf -c {H5_IP} -u -b {bw_h3} -t {DURATION} &')
-            net.get('h4').cmd(f'iperf -c {H6_IP} -u -b {bw_h4} -t {DURATION} &')
-
-        # Wait for the phase duration
+            total = int(bw_h3[:-1]) + int(bw_h4[:-1])
+            print(f"[{label:<23}]  {total}M/10M        {duration:>5}s")
+            start_clients(bw_h3, bw_h4)
+ 
         for remaining in range(duration, 0, -10):
             time.sleep(min(10, remaining))
-            print(f"  ... {remaining}s remaining in phase [{label}]")
-
-    # Clean up
-    kill_iperf(net)
-    print("\n[traffic] Congestion cycle complete. All iperf clients stopped.")
-
-
-# --- Entry point when exec'd from Mininet CLI ---
-# mininet> py exec(open('/path/to/traffic_controller.py').read())
-<<<<<<< HEAD
-# This makes run_phases(net) available to call immediately after
-run_phases(net)
-=======
-if 'net' in dir():
-    run_phases(net)
-else:
-    print("[traffic] 'net' not found in scope. Run from Mininet CLI with: py exec(open('...').read())")
->>>>>>> ee7e4dd675a6a9e243f2dff200bbc945746378d5
+            print(f"  ... {remaining}s remaining [{label}]")
+ 
+    kill_iperf_clients()
+    print("\n[traffic] Cycle complete.")
+ 
+if __name__ == "__main__":
+    if os.geteuid() != 0:
+        print("[ERROR] Run as root: sudo python3 traffic_controller.py")
+        exit(1)
+    run_phases()
