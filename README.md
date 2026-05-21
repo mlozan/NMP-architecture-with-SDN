@@ -108,7 +108,7 @@ curl --user onos:rocks http://localhost:8181/onos/v1/links | jq
 
 ## 🌐 11. ONOS Web UI
 ```bash
-http://localhost:8181/onos/ui
+http://192.168.56.101:8181/onos/ui
 
 
 
