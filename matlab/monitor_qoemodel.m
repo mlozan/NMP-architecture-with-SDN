@@ -29,7 +29,7 @@ S1_ID       = 'of:0000000000000001';
 PORT_PATH_A = '2';
 
 % --- QoE ---
-QOE_THRESHOLD = 0.5;
+QOE_THRESHOLD = 0.6;
 COOLDOWN_S    = 30;     % increased to allow ONOS convergence after rerouting
 
 % --- Plot settings ---
