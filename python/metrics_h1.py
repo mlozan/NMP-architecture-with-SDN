@@ -8,19 +8,26 @@ The UDP sender script on the VM reads this file and forwards metrics to MATLAB.
 import os
 import re
 import time
+import statistics
 
 # --- Configuration ---
 TARGET_IP  = "10.0.0.2"    # h2
 PING_COUNT = 10             # packets per measurement round
+PING_INTERVAL = 0.1         # seconds between pings (0.1 = 100ms)
+                            # Default ping interval is 1s — too slow: the OS
+                            # scheduler and OVS queues change state between
+                            # packets, producing artificially high jitter.
+                            # 100ms keeps consecutive RTTs comparable.
 DSCP_VALUE = 46             # Expedited Forwarding (EF) — highest priority
 LOG_FILE   = "/tmp/metrics.txt"
-INTERVAL   = 0              # seconds between rounds (0 = back-to-back)
 
 # DSCP 46 sets the TOS byte to 46<<2 = 184 (EF PHB)
 # ping -Q sets the DSCP field in the IP header
-PING_CMD = f"ping -c {PING_COUNT} -Q {DSCP_VALUE} {TARGET_IP}"
+# ping -i sets the interval between packets (requires root for < 0.2s)
+PING_CMD = f"ping -c {PING_COUNT} -i {PING_INTERVAL} -Q {DSCP_VALUE} {TARGET_IP}"
 
-print(f"[metrics_h1] Starting — target={TARGET_IP}  DSCP={DSCP_VALUE}  count={PING_COUNT}")
+print(f"[metrics_h1] Starting — target={TARGET_IP}  DSCP={DSCP_VALUE}  "
+      f"count={PING_COUNT}  interval={PING_INTERVAL}s")
 
 while True:
     output = os.popen(PING_CMD).read()
@@ -38,11 +45,12 @@ while True:
         # Average delay across all successful pings
         delay = sum(rtt_values) / len(rtt_values)
 
-        # Jitter: mean of absolute differences between consecutive RTTs
-        # e.g. RTTs=[10, 13, 11] → diffs=[3, 2] → jitter=2.5
         if len(rtt_values) > 1:
-            diffs  = [abs(rtt_values[i+1] - rtt_values[i]) for i in range(len(rtt_values) - 1)]
-            jitter = sum(diffs) / len(diffs)
+            diffs = [abs(rtt_values[i+1] - rtt_values[i])
+                     for i in range(len(rtt_values) - 1)]
+            # Median is robust against the 1-2 outlier spikes that
+            # a mean would amplify into a falsely high jitter reading.
+            jitter = statistics.median(diffs)
         else:
             jitter = 0.0
 
@@ -56,6 +64,3 @@ while True:
     os.rename(tmp, LOG_FILE)
 
     print(f"[metrics_h1] delay={delay:.3f}ms  jitter={jitter:.3f}ms  loss={loss:.2f}")
-
-    if INTERVAL > 0:
-        time.sleep(INTERVAL)
