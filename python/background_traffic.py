@@ -11,7 +11,7 @@ Run directly from the VM (no need to enter the Mininet CLI):
 Requirements:
   - Mininet must already be running with topo_qoe.py
   - iperf (v2) must be installed on the VM  <-- NOT iperf3
-  - Must be run with sudo (required for mnexec to enter host namespaces)
+  - Must be run with sudo (required for mnexec and tc)
 
 Traffic phases (cycled once):
   1. No congestion    0 + 0   Mbps   30 s
@@ -29,6 +29,11 @@ import os
 H5_IP    = "10.0.0.5"
 H6_IP    = "10.0.0.6"
 DURATION = 99999        # iperf client duration (s) — effectively infinite per phase
+
+# Interface on s1 that faces Path A (s1 → s3).
+# Confirmed from ONOS: s1 port 3 → s3, which maps to s1-eth3 in the VM.
+TC_IFACE = "s1-eth3"
+TC_RATE  = "10mbit"     # hard cap matching the Mininet link bandwidth
 
 # Congestion phases: (label, bw_h3, bw_h4, phase_duration_s)
 PHASES = [
@@ -69,6 +74,39 @@ def run_in_host(hostname, cmd, background=False):
     else:
         subprocess.run(full, shell=True)
 
+# ─── tc bandwidth cap on Path A ───────────────────────────────────────────────
+
+def apply_tc():
+    """
+    Apply a 10 Mbit/s hard cap on s1-eth3 (the s1→s3 Path A interface) using
+    a Token Bucket Filter (TBF) qdisc. This ensures that even if iperf sends
+    slightly over the link rate, the bottleneck is enforced at the right place
+    and congestion is clearly measurable by metrics_h1.py.
+    """
+    print(f"[tc] Applying {TC_RATE} cap on {TC_IFACE} (s1 → s3, Path A)...")
+    # Remove any existing qdisc first to avoid 'already exists' errors
+    subprocess.run(
+        f"tc qdisc del dev {TC_IFACE} root 2>/dev/null",
+        shell=True
+    )
+    ret = subprocess.run(
+        f"tc qdisc add dev {TC_IFACE} root tbf rate {TC_RATE} burst 32kbit latency 400ms",
+        shell=True
+    )
+    if ret.returncode == 0:
+        print(f"[tc] Cap applied successfully.")
+    else:
+        print(f"[tc] WARNING: could not apply tc cap on {TC_IFACE}. "
+              "Congestion may be less pronounced.")
+
+def remove_tc():
+    """Remove the TBF qdisc from the Path A interface on cleanup."""
+    print(f"[tc] Removing tc cap from {TC_IFACE}...")
+    subprocess.run(
+        f"tc qdisc del dev {TC_IFACE} root 2>/dev/null",
+        shell=True
+    )
+
 # ─── Traffic control ──────────────────────────────────────────────────────────
 
 def kill_clients():
@@ -107,6 +145,7 @@ def start_clients(bw_h3, bw_h4):
 
 def run_phases():
     """Cycle through all congestion phases, printing progress every 10 s."""
+    apply_tc()
     start_servers()
     print("\n[traffic] Starting congestion cycle...\n")
 
@@ -127,6 +166,7 @@ def run_phases():
             print(f"  ... {remaining}s remaining")
 
     kill_clients()
+    remove_tc()
     print("\n[traffic] All phases complete.")
 
 # ─── Entry point ──────────────────────────────────────────────────────────────
