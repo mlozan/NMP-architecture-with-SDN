@@ -1,15 +1,4 @@
 %% QoE Monitor + ONOS Rerouting + Real-time Plots
-%  Receives network metrics via UDP from the Mininet VM
-%  Computes QoE using a music-aware degradation model (L_max from MIDI analysis)
-%  Calls the ONOS REST API to reroute traffic when QoE drops below threshold
-%  Displays 3 real-time subplots: QoE, network metrics, and port traffic stats
-%
-%  Flow under monitoring: h1 → h2  (DSCP 46, Expedited Forwarding)
-%  Background traffic:    h3/h4 → h5/h6  (DSCP 0, best effort)
-%
-%  Path A (default): s1 → s3 → s4  (2 hops, shortest, shared with iperf)
-%  Path B (reroute): s1 → s2 → s5 → s4  (3 hops, free when Path A congested)
-
 clc; clear; close all;
 
 %% =========================================================
@@ -26,7 +15,7 @@ ONOS_PASS     = 'rocks';
 % S1 port 2 faces Path A (s1 → s3, shortest path)
 % Disabling this port forces ONOS to reroute via Path B (s1 → s2 → s5 → s4)
 S1_ID       = 'of:0000000000000001';
-PORT_PATH_A = '2';
+PORT_PATH_A = '3';
 
 % --- QoE ---
 QOE_THRESHOLD = 0.6;
@@ -190,7 +179,7 @@ while true
     t_now = posixtime(datetime('now')) - t_start;   % seconds since start
 
     %% --- Compute D and QoE ---
-    D   = delay_ms + 1.5 * jitter_ms + 500 * loss_frac;
+    D   = delay_ms + jitter_ms + 200 * loss_frac;
     QoE = max(0, 1 - D / L_max);
 
     active_path = 'A';
