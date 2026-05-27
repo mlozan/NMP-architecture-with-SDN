@@ -34,21 +34,22 @@ sudo apt install mininet -y
 
 ## 🐳 2. Install and Start ONOS (Docker)
 
+First time: 
 ```bash
 sudo apt install docker.io -y
 sudo systemctl start docker
 
 sudo docker pull onosproject/onos:2.7.0
 
-sudo docker run onosproject/onos
-
-sudo docker start onos
-
 sudo docker run -d --name onos \
 -p 8181:8181 \
 -p 6653:6653 \
 -p 8101:8101 \
 onosproject/onos:2.7.0
+```
+
+```bash
+sudo docker start onos
 ```
 
 ## 🔐 3. Access ONOS CLI
@@ -108,7 +109,7 @@ curl --user onos:rocks http://localhost:8181/onos/v1/links | jq
 
 ## 🌐 11. ONOS Web UI
 ```bash
-http://localhost:8181/onos/ui
+http://192.168.56.101:8181/onos/ui
 
 
 

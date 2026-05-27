@@ -2,172 +2,177 @@
 """
 background_traffic.py
 =====================
-Generates background UDP traffic between h3→h5 and h4→h6 to saturate
-Path A (s1→s3→s4), causing QoE degradation on the monitored h1→h2 flow.
+Generates phased background UDP traffic between h3→h5 and h4→h6 to saturate
+Path A (s1→s3→s4), triggering QoE degradation and ONOS rerouting.
 
 Run directly from the VM (no need to enter the Mininet CLI):
     sudo python3 background_traffic.py
 
 Requirements:
   - Mininet must already be running with topo_qoe.py
-  - iperf3 must be installed on the VM
-  - Must be run with sudo (required for mnexec to enter host namespaces)
+  - iperf (v2) must be installed on the VM  <-- NOT iperf3
+  - Must be run with sudo (required for mnexec and tc)
+
+Traffic phases (cycled once):
+  1. No congestion    0 + 0   Mbps   30 s
+  2. Light            3 + 3   Mbps   60 s
+  3. Medium           5 + 5   Mbps   60 s
+  4. Heavy            9.5+9.5 Mbps   60 s
+  5. No congestion    0 + 0   Mbps   30 s
 """
 
 import subprocess
 import time
-import signal
-import sys
 import os
 
 # ─── Configuration ────────────────────────────────────────────────────────────
-IPERF_DURATION  = 9999       # seconds (~infinite; press Ctrl+C to stop)
-BANDWIDTH_MBPS  = "9M"       # UDP bandwidth per flow (~9 Mbps on a 10 Mbps link)
-IPERF_PORT_H5   = 5201       # iperf3 server port on h5
-IPERF_PORT_H6   = 5202       # iperf3 server port on h6
-IP_H5           = "10.0.0.5"
-IP_H6           = "10.0.0.6"
+H5_IP    = "10.0.0.5"
+H6_IP    = "10.0.0.6"
+DURATION = 99999        # iperf client duration (s) — effectively infinite per phase
 
-# ─── Helpers: locate Mininet host namespace ───────────────────────────────────
+# Interface on s1 that faces Path A (s1 → s3).
+# Confirmed from ONOS: s1 port 3 → s3, which maps to s1-eth3 in the VM.
+TC_IFACE = "s1-eth3"
+TC_RATE  = "10mbit"     # hard cap matching the Mininet link bandwidth
 
-def get_host_pid(hostname):
+# Congestion phases: (label, bw_h3, bw_h4, phase_duration_s)
+PHASES = [
+    ("No congestion",     "0M",   "0M",    30),
+    ("Light congestion",  "3M",   "3M",    60),
+    ("Medium congestion", "5M",   "5M",    60),
+    ("Heavy congestion",  "9.5M", "9.5M",  60),
+    ("No congestion",     "0M",   "0M",    30),
+]
+
+# ─── Helpers ──────────────────────────────────────────────────────────────────
+
+def get_pid(hostname):
     """
     Returns the PID of the process running inside the network namespace of the
-    given Mininet host. Mininet names its host processes as 'mininet:<hostname>'.
+    given Mininet host. Mininet names its processes as 'mininet:<hostname>'.
     """
-    try:
-        result = subprocess.check_output(
-            ["pgrep", "-f", f"mininet:{hostname}"],
-            text=True
-        ).strip()
-        pids = result.splitlines()
-        if not pids:
-            raise RuntimeError(f"No process found for mininet:{hostname}")
-        return int(pids[0])
-    except subprocess.CalledProcessError:
-        raise RuntimeError(
-            f"Host '{hostname}' not found. "
-            "Is Mininet running with topo_qoe.py?"
-        )
+    result = subprocess.run(
+        ["pgrep", "-f", f"mininet:{hostname}"],
+        capture_output=True, text=True
+    )
+    lines = result.stdout.strip().split("\n")
+    return lines[0].strip() if lines and lines[0] else None
 
-def run_in_host(hostname, cmd, background=True):
+def run_in_host(hostname, cmd, background=False):
     """
-    Runs a command inside the network namespace of a Mininet host using mnexec.
-    If background=True, launches the process in the background and returns the
-    Popen object so it can be terminated later.
+    Runs a shell command inside the network namespace of a Mininet host.
+    Uses mnexec -a <pid> to attach to the host's namespace.
+    If background=True the command is launched with & (fire-and-forget).
     """
-    pid = get_host_pid(hostname)
-    full_cmd = ["mnexec", "-a", str(pid)] + cmd
+    pid = get_pid(hostname)
+    if not pid:
+        print(f"[ERROR] No PID found for host '{hostname}'. Is Mininet running?")
+        return
+    full = f"mnexec -a {pid} {cmd}"
     if background:
-        proc = subprocess.Popen(
-            full_cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
-        )
-        return proc
+        os.system(full + " &")
     else:
-        subprocess.run(full_cmd, check=False)
-        return None
+        subprocess.run(full, shell=True)
 
-# ─── Main logic ───────────────────────────────────────────────────────────────
+# ─── tc bandwidth cap on Path A ───────────────────────────────────────────────
 
-procs = []   # track background processes so they can be cleaned up on exit
+def apply_tc():
+    """
+    Apply a 10 Mbit/s hard cap on s1-eth3 (the s1→s3 Path A interface) using
+    a Token Bucket Filter (TBF) qdisc. This ensures that even if iperf sends
+    slightly over the link rate, the bottleneck is enforced at the right place
+    and congestion is clearly measurable by metrics_h1.py.
+    """
+    print(f"[tc] Applying {TC_RATE} cap on {TC_IFACE} (s1 → s3, Path A)...")
+    # Remove any existing qdisc first to avoid 'already exists' errors
+    subprocess.run(
+        f"tc qdisc del dev {TC_IFACE} root 2>/dev/null",
+        shell=True
+    )
+    ret = subprocess.run(
+        f"tc qdisc add dev {TC_IFACE} root tbf rate {TC_RATE} burst 32kbit latency 400ms",
+        shell=True
+    )
+    if ret.returncode == 0:
+        print(f"[tc] Cap applied successfully.")
+    else:
+        print(f"[tc] WARNING: could not apply tc cap on {TC_IFACE}. "
+              "Congestion may be less pronounced.")
+
+def remove_tc():
+    """Remove the TBF qdisc from the Path A interface on cleanup."""
+    print(f"[tc] Removing tc cap from {TC_IFACE}...")
+    subprocess.run(
+        f"tc qdisc del dev {TC_IFACE} root 2>/dev/null",
+        shell=True
+    )
+
+# ─── Traffic control ──────────────────────────────────────────────────────────
+
+def kill_clients():
+    """Kill iperf client processes on h3 and h4."""
+    for host in ["h3", "h4"]:
+        pid = get_pid(host)
+        if pid:
+            os.system(f"mnexec -a {pid} pkill -f iperf 2>/dev/null")
 
 def start_servers():
-    """Start iperf3 servers on h5 and h6."""
-    print("[BG] Killing any existing iperf3 instances on h5 and h6...")
-    run_in_host("h5", ["pkill", "-f", "iperf3"], background=False)
-    run_in_host("h6", ["pkill", "-f", "iperf3"], background=False)
-    time.sleep(0.5)
+    """
+    Start iperf v2 UDP servers on h5 and h6 in daemon mode (-D).
+    Kills any existing iperf instances first.
+    """
+    print("[traffic] Starting iperf servers on h5 and h6...")
+    for host in ["h5", "h6"]:
+        pid = get_pid(host)
+        if pid:
+            os.system(f"mnexec -a {pid} pkill iperf 2>/dev/null")
+            os.system(f"mnexec -a {pid} iperf -s -u -D")   # UDP server, daemonized
+    time.sleep(1)   # give servers time to bind before clients connect
 
-    print(f"[BG] Starting iperf3 server on h5 (port {IPERF_PORT_H5})...")
-    p1 = run_in_host("h5", [
-        "iperf3", "-s", "-p", str(IPERF_PORT_H5),
-        "--logfile", "/tmp/iperf_server_h5.log"
-    ])
-    procs.append(p1)
+def start_clients(bw_h3, bw_h4):
+    """
+    Launch iperf v2 UDP clients on h3 and h4.
+    h3 → h5, h4 → h6, both on Path A — combined load saturates the link.
+    """
+    pid_h3 = get_pid("h3")
+    pid_h4 = get_pid("h4")
+    if pid_h3:
+        os.system(f"mnexec -a {pid_h3} iperf -c {H5_IP} -u -b {bw_h3} -t {DURATION} &")
+    if pid_h4:
+        os.system(f"mnexec -a {pid_h4} iperf -c {H6_IP} -u -b {bw_h4} -t {DURATION} &")
 
-    print(f"[BG] Starting iperf3 server on h6 (port {IPERF_PORT_H6})...")
-    p2 = run_in_host("h6", [
-        "iperf3", "-s", "-p", str(IPERF_PORT_H6),
-        "--logfile", "/tmp/iperf_server_h6.log"
-    ])
-    procs.append(p2)
+# ─── Phase runner ─────────────────────────────────────────────────────────────
 
-    time.sleep(1)   # wait for servers to be ready before launching clients
+def run_phases():
+    """Cycle through all congestion phases, printing progress every 10 s."""
+    apply_tc()
+    start_servers()
+    print("\n[traffic] Starting congestion cycle...\n")
 
-def start_clients():
-    """Launch UDP iperf3 clients from h3→h5 and h4→h6."""
-    print(f"[BG] UDP client h3 → h5 ({IP_H5}:{IPERF_PORT_H5})  bw={BANDWIDTH_MBPS}")
-    p3 = run_in_host("h3", [
-        "iperf3",
-        "-c", IP_H5,
-        "-p", str(IPERF_PORT_H5),
-        "-u",                        # UDP mode
-        "-b", BANDWIDTH_MBPS,
-        "-t", str(IPERF_DURATION),
-        "--logfile", "/tmp/iperf_client_h3.log"
-    ])
-    procs.append(p3)
+    for label, bw_h3, bw_h4, phase_dur in PHASES:
+        kill_clients()
+        time.sleep(0.5)
 
-    print(f"[BG] UDP client h4 → h6 ({IP_H6}:{IPERF_PORT_H6})  bw={BANDWIDTH_MBPS}")
-    p4 = run_in_host("h4", [
-        "iperf3",
-        "-c", IP_H6,
-        "-p", str(IPERF_PORT_H6),
-        "-u",                        # UDP mode
-        "-b", BANDWIDTH_MBPS,
-        "-t", str(IPERF_DURATION),
-        "--logfile", "/tmp/iperf_client_h4.log"
-    ])
-    procs.append(p4)
+        if bw_h3 == "0M":
+            print(f"[{label}] idle for {phase_dur}s")
+        else:
+            total = float(bw_h3[:-1]) + float(bw_h4[:-1])
+            print(f"[{label}] load {total}M / 10M for {phase_dur}s")
+            start_clients(bw_h3, bw_h4)
 
-def stop_all(signum=None, frame=None):
-    """Gracefully stop all iperf3 processes on Ctrl+C or SIGTERM."""
-    print("\n[BG] Stopping background traffic...")
+        # Count down, printing a heartbeat every 10 s
+        for remaining in range(phase_dur, 0, -10):
+            time.sleep(min(10, remaining))
+            print(f"  ... {remaining}s remaining")
 
-    # Terminate tracked Popen objects
-    for p in procs:
-        try:
-            p.terminate()
-        except Exception:
-            pass
-
-    # Also pkill inside each namespace in case any process became orphaned
-    for host in ["h3", "h4", "h5", "h6"]:
-        try:
-            run_in_host(host, ["pkill", "-f", "iperf3"], background=False)
-        except Exception:
-            pass
-
-    print("[BG] Background traffic stopped.")
-    sys.exit(0)
+    kill_clients()
+    remove_tc()
+    print("\n[traffic] All phases complete.")
 
 # ─── Entry point ──────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     if os.geteuid() != 0:
         print("[ERROR] This script must be run with sudo.")
-        sys.exit(1)
-
-    # Register signal handlers for clean shutdown
-    signal.signal(signal.SIGINT,  stop_all)
-    signal.signal(signal.SIGTERM, stop_all)
-
-    print("=" * 50)
-    print(" Background Traffic Generator (VM mode)")
-    print("=" * 50)
-
-    try:
-        start_servers()
-        start_clients()
-    except RuntimeError as e:
-        print(f"[ERROR] {e}")
-        sys.exit(1)
-
-    print("\n[BG] Traffic active. Logs at /tmp/iperf_client_h*.log")
-    print("[BG] Press Ctrl+C to stop.\n")
-
-    # Keep the script alive so Ctrl+C can trigger the signal handler
-    while True:
-        time.sleep(1)
+        exit(1)
+    run_phases()
