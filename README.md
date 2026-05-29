@@ -52,6 +52,16 @@ onosproject/onos:2.7.0
 docker run -p 192.168.56.101:8181:8181 onosproject/onos
 ```
 
+```bash
+sudo docker run -d --name onos \
+  -p 192.168.56.102:8181:8181 \
+  -p 192.168.56.102:6653:6653 \
+  -p 192.168.56.102:6640:6640 \
+  -p 127.0.0.1:8101:8101 \
+  onosproject/onos:2.7.0
+```
+
+
 ## 🔐 3. Access ONOS CLI
 ```bash
 ssh -o HostKeyAlgorithms=+ssh-rsa \
