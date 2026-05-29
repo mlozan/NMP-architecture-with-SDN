@@ -49,7 +49,7 @@ onosproject/onos:2.7.0
 ```
 
 ```bash
-docker run -p 192.168.56.102:8181:8181 onosproject/onos
+docker run -p 192.168.56.101:8181:8181 onosproject/onos
 ```
 
 ## 🔐 3. Access ONOS CLI
