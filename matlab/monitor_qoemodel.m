@@ -128,14 +128,14 @@ log_qoe      = [];   % QoE [0-1]
 log_path     = [];   % active path: 0=A, 1=B
 
 %% =========================================================
-%% FIGURE SETUP — 3 subplots
+%% FIGURE SETUP — 2 subplots
 %% =========================================================
 fig = figure('Name', sprintf('QoE Monitor — %s — %s', SONG_NAME, exp_label), ...
              'NumberTitle', 'off', ...
              'Position', [50 50 1100 750]);
 
 % --- Subplot 1: QoE over time ---
-ax1 = subplot(3,1,1);
+ax1 = subplot(2,1,1);
 h_qoe    = animatedline(ax1, 'Color', [0.13 0.55 0.13], 'LineWidth', 2);
 h_thresh = yline(ax1, QOE_THRESHOLD, '--r', 'LineWidth', 1.5, ...
                  'Label', sprintf('Threshold (%.2f)', QOE_THRESHOLD));
@@ -147,7 +147,7 @@ grid(ax1, 'on');
 legend(ax1, 'QoE', 'Threshold', 'Location', 'southwest');
 
 % --- Subplot 2: Delay / Jitter / Loss ---
-ax2 = subplot(3,1,2);
+ax2 = subplot(2,1,2);
 h_delay  = animatedline(ax2, 'Color', [0.00 0.45 0.74], ...
                         'LineWidth', 1.5, 'DisplayName', 'Delay (ms)');
 h_jitter = animatedline(ax2, 'Color', [0.85 0.33 0.10], ...
@@ -159,17 +159,7 @@ title(ax2, 'Network Metrics — Delay / Jitter / Loss');
 grid(ax2, 'on');
 legend(ax2, 'Location', 'northwest');
 
-% --- Subplot 3: Port traffic (bytes received per switch) ---
-ax3 = subplot(3,1,3);
-h_port_bars = bar(ax3, zeros(1,4), 'FaceColor', 'flat');
-h_port_bars.CData = [0.00 0.45 0.74;
-                     0.47 0.67 0.19;
-                     0.85 0.33 0.10;
-                     0.49 0.18 0.56];
-set(ax3, 'XTickLabel', {'s1','s2','s3','s4'});
-ylabel(ax3, 'Bytes received');
-title(ax3, 'Switch Port Traffic (total bytes received)');
-grid(ax3, 'on');
+
 
 % Rerouting event markers
 reroute_times = [];
@@ -266,29 +256,6 @@ while true
         xc2.Annotation.LegendInformation.IconDisplayStyle = 'off';
         congestion_marked = true;
         fprintf('\n[INFO] Congestion start marked at t=%.1fs\n\n', congestion_time);
-    end
-
-    % Subplot 3: port traffic from ONOS
-    try
-        stats = webread(sprintf('%s/statistics/ports', ONOS_BASE), opts_get);
-        bytes_per_switch = zeros(1,4);
-        dev_ids = {'of:0000000000000001', 'of:0000000000000002', ...
-                   'of:0000000000000003', 'of:0000000000000004'};
-        for d = 1:numel(stats)
-            dev = stats(d);
-            for dd = 1:4
-                if strcmp(dev.device, dev_ids{dd})
-                    total = 0;
-                    for p = 1:numel(dev.statistics)
-                        total = total + dev.statistics(p).bytesReceived;
-                    end
-                    bytes_per_switch(dd) = total;
-                end
-            end
-        end
-        h_port_bars.YData = bytes_per_switch;
-    catch
-        % Skip port stats if ONOS call fails
     end
 
     % Draw rerouting markers
