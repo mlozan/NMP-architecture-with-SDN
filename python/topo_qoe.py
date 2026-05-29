@@ -1,11 +1,11 @@
 from mininet.topo import Topo
+from mininet.link import TCLink
 
 class QoETopo(Topo):
     def build(self):
-        # --- Priority hosts (h1 → h2 is the monitored QoE flow) ---
+        # --- Priority hosts (h1 -> h2 is the monitored QoE flow) ---
         h1 = self.addHost('h1', ip='10.0.0.1/24')
         h2 = self.addHost('h2', ip='10.0.0.2/24')
-
         # --- Background traffic hosts ---
         h3 = self.addHost('h3', ip='10.0.0.3/24')   # iperf sender, left side
         h4 = self.addHost('h4', ip='10.0.0.4/24')   # iperf sender, left side
@@ -20,29 +20,30 @@ class QoETopo(Topo):
         s4 = self.addSwitch('s4')   # right edge switch
 
         # --- Priority flow links ---
-        self.addLink(h1, s1)        # s1 port 1 → h1
-        self.addLink(s4, h2)
+        # h1 and h2 get 100 Mbps to the edge switch — not the bottleneck
+        self.addLink(h1, s1, cls=TCLink, bw=100)
+        self.addLink(s4, h2, cls=TCLink, bw=100)
 
-        # --- Path A: s1 → s3 → s4 (2 hops, shortest, default ONOS path) ---
-        # s1 port 2 → s3  (PORT_PATH_A = '2' in MATLAB)
-        # Background iperf also uses this path → saturates it → QoE drops
-        self.addLink(s1, s3, bw=10)
-        self.addLink(s3, s4, bw=10)
+        # --- Path A: s1 -> s3 -> s4 (2 hops, shortest, default ONOS path) ---
+        # Bottleneck: 10 Mbps — shared by QoE flow AND background iperf
+        # When iperf saturates this, QoE degrades
+        self.addLink(s1, s3, cls=TCLink, bw=10)   # s1 port 2 -> s3
+        self.addLink(s3, s4, cls=TCLink, bw=10)
 
-        # --- Path B: s1 → s2 → s5 → s4 (3 hops, longer, free for rerouting) ---
-        # s1 port 3 → s2
-        self.addLink(s1, s2, bw=10)
-        self.addLink(s2, s5, bw=10)
-        self.addLink(s5, s4, bw=10)
+        # --- Path B: s1 -> s2 -> s5 -> s4 (3 hops, longer, free for rerouting) ---
+        self.addLink(s1, s2, cls=TCLink, bw=10)   # s1 port 3 -> s2
+        self.addLink(s2, s5, cls=TCLink, bw=10)
+        self.addLink(s5, s4, cls=TCLink, bw=10)
 
         # --- Cross link between core switches (mesh connectivity) ---
-        self.addLink(s2, s3, bw=10)
+        self.addLink(s2, s3, cls=TCLink, bw=10)
 
-        # --- Background hosts (high bandwidth, not the bottleneck) ---
-        self.addLink(h3, s1, bw=100)
-        self.addLink(h4, s1, bw=100)
-        self.addLink(h5, s4, bw=100)
-        self.addLink(h6, s4, bw=100)
+        # --- Background hosts ---
+        # High bandwidth to edge switch — bottleneck is Path A core links
+        self.addLink(h3, s1, cls=TCLink, bw=100)
+        self.addLink(h4, s1, cls=TCLink, bw=100)
+        self.addLink(h5, s4, cls=TCLink, bw=100)
+        self.addLink(h6, s4, cls=TCLink, bw=100)
 
 # Register topology so Mininet can load it by name
 topos = {'qoe': (lambda: QoETopo())}
