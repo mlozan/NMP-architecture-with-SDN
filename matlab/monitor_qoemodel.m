@@ -205,6 +205,13 @@ last_reroute  = -Inf;
 iter          = 0;
 t_start       = posixtime(datetime('now'));
 
+% --- Auto-save on exit (Ctrl+C, error, or normal stop) ---
+% onCleanup runs this function no matter how the script stops.
+clean = onCleanup(@() auto_save(fig, ax1, ax2, ax3, ...
+    log_t, log_delay, log_jitter, log_loss, log_D, log_qoe, log_path, ...
+    log_phase_medium, log_phase_heavy, phase_medium_t, phase_heavy_t, ...
+    SONG_NAME, L_max, QOE_THRESHOLD, REROUTING_ENABLED));
+
 fprintf('%-5s  %-8s %-8s %-7s  %-8s  %-6s  %-13s  %s\n', ...
         'Iter', 'Lat(ms)', 'Jit(ms)', 'Loss(%)', 'D(ms)', ...
         'QoE', 'Quality', 'Path');
@@ -401,4 +408,68 @@ function lbl = qoe_label(q)
     elseif q >  0,    lbl = 'Poor';
     else,             lbl = 'Unacceptable';
     end
+end
+
+function auto_save(fig, ax1, ax2, ax3, ...
+        log_t, log_delay, log_jitter, log_loss, log_D, log_qoe, log_path, ...
+        log_phase_medium, log_phase_heavy, phase_medium_t, phase_heavy_t, ...
+        SONG_NAME, L_max, QOE_THRESHOLD, REROUTING_ENABLED)
+% Automatically called when the script stops (Ctrl+C, error, or normal end).
+% Saves the figure as PNG and the workspace as .mat with the song name.
+
+    fprintf('\n[AUTO-SAVE] Saving results for %s...\n', SONG_NAME);
+
+    % Build safe filename (replace spaces with underscores)
+    song_safe = strrep(SONG_NAME, ' ', '_');
+    if REROUTING_ENABLED
+        prefix = 'exp2';
+    else
+        prefix = 'exp1';
+    end
+    fname = sprintf('%s_%s', prefix, song_safe);
+
+    % Fix x-axis to show full experiment from 0 to end
+    if ~isempty(log_t)
+        t_end = max(log_t);
+        try
+            xlim(ax1, [0, t_end]);
+            xlim(ax2, [0, t_end]);
+            xlim(ax3, [0, t_end]);
+        catch
+        end
+    end
+
+    % Export figure as PNG at 300 dpi
+    try
+        drawnow;
+        exportgraphics(fig, sprintf('%s.png', fname), 'Resolution', 300);
+        fprintf('[AUTO-SAVE] Figure saved: %s.png\n', fname);
+    catch e
+        fprintf('[AUTO-SAVE] Could not save figure: %s\n', e.message);
+    end
+
+    % Save workspace data as .mat
+    try
+        save(sprintf('%s.mat', fname), ...
+             'log_t', 'log_delay', 'log_jitter', 'log_loss', ...
+             'log_D', 'log_qoe', 'log_path', ...
+             'log_phase_medium', 'log_phase_heavy', ...
+             'phase_medium_t', 'phase_heavy_t', ...
+             'SONG_NAME', 'L_max', 'QOE_THRESHOLD', 'REROUTING_ENABLED');
+        fprintf('[AUTO-SAVE] Data saved:   %s.mat\n', fname);
+    catch e
+        fprintf('[AUTO-SAVE] Could not save .mat: %s\n', e.message);
+    end
+
+    % Save as Excel too
+    try
+        T = table(log_t', log_delay', log_jitter', log_loss' * 100, log_D', log_qoe', ...
+                  'VariableNames', {'Time_s','Delay_ms','Jitter_ms','Loss_pct','D_ms','QoE'});
+        writetable(T, sprintf('%s.xlsx', fname));
+        fprintf('[AUTO-SAVE] Excel saved:  %s.xlsx\n', fname);
+    catch e
+        fprintf('[AUTO-SAVE] Could not save Excel: %s\n', e.message);
+    end
+
+    fprintf('[AUTO-SAVE] Done. Files saved in: %s\n', pwd);
 end
