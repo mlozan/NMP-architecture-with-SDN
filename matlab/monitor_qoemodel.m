@@ -12,7 +12,7 @@ REROUTING_ENABLED = false;
 
 % --- Network ---
 UDP_PORT      = 5006;
-ONOS_BASE     = 'http://192.168.56.101:8181/onos/v1';
+ONOS_BASE     = 'http://192.168.56.102:8181/onos/v1';
 ONOS_USER     = 'onos';
 ONOS_PASS     = 'rocks';
 
@@ -125,7 +125,9 @@ log_jitter   = [];   % jitter [ms]
 log_loss     = [];   % loss fraction [0-1]
 log_D        = [];   % composite degradation D [ms]
 log_qoe      = [];   % QoE [0-1]
-log_path     = [];   % active path: 0=A, 1=B
+log_path         = [];   % active path: 0=A, 1=B
+log_phase_medium = [];   % t of medium congestion start (repeated per sample)
+log_phase_heavy  = [];   % t of heavy congestion start (repeated per sample)
 
 %% =========================================================
 %% FIGURE SETUP — 2 subplots
@@ -165,23 +167,24 @@ legend(ax2, 'Location', 'northwest');
 reroute_times = [];
 
 %% =========================================================
-%% CONGESTION EVENT MARKER
+%% PHASE SIGNAL — read automatically from /tmp/phase.txt
+%% Written by experiment1_no_rerouting.py at each phase transition
+%% Phases: 'none' | 'medium' | 'heavy'
 %% =========================================================
-% Mark the moment you start iperf manually so it appears on the plot.
-% Call mark_congestion_start() from the MATLAB command window when
-% you paste the iperf commands into the Mininet CLI.
-% Example: >> mark_congestion_start()
-congestion_marked = false;
-congestion_time   = NaN;
+PHASE_FILE      = '/tmp/phase.txt';
+last_phase      = 'none';       % last phase read from file
+phase_medium_t  = NaN;          % t when medium congestion started
+phase_heavy_t   = NaN;          % t when heavy congestion started
+phase_marked_medium = false;
+phase_marked_heavy  = false;
 
 %% =========================================================
 %% MAIN LOOP
 %% =========================================================
 u = udpport('datagram', 'IPv4', 'LocalPort', UDP_PORT);
 fprintf('Listening for UDP metrics on port %d...\n\n', UDP_PORT);
-fprintf('TIP: When you start iperf in Mininet, run this in the MATLAB\n');
-fprintf('     command window to mark the congestion start on the plot:\n');
-fprintf('     >> mark_congestion_start()\n\n');
+fprintf('Phase markers (no load / medium / heavy) are detected automatically\n');
+fprintf('from /tmp/phase.txt written by experiment1_no_rerouting.py\n\n');
 
 path_degraded = false;
 last_reroute  = -Inf;
@@ -236,6 +239,8 @@ while true
         log_D(end+1)      = D;           %#ok<AGROW>
         log_qoe(end+1)    = QoE;         %#ok<AGROW>
         log_path(end+1)   = double(path_degraded); %#ok<AGROW>
+        log_phase_medium(end+1) = phase_medium_t;  %#ok<AGROW>
+        log_phase_heavy(end+1)  = phase_heavy_t;   %#ok<AGROW>
     end
 
     %% --- Update plots ---
@@ -247,15 +252,36 @@ while true
     addpoints(h_loss,   t_now, loss_frac * 100);
     xlim(ax2, [max(0, t_now - PLOT_WINDOW), max(PLOT_WINDOW, t_now)]);
 
-    % Draw congestion marker (vertical line when iperf started)
-    if ~congestion_marked && ~isnan(congestion_time)
-        xc1 = xline(ax1, congestion_time, '-b', 'LineWidth', 1.5, ...
-                    'Label', 'Congestion start');
-        xc1.Annotation.LegendInformation.IconDisplayStyle = 'off';
-        xc2 = xline(ax2, congestion_time, '-b', 'LineWidth', 1.5);
-        xc2.Annotation.LegendInformation.IconDisplayStyle = 'off';
-        congestion_marked = true;
-        fprintf('\n[INFO] Congestion start marked at t=%.1fs\n\n', congestion_time);
+    %% --- Read phase signal file (written by experiment script) ---
+    try
+        current_phase = strtrim(fileread(PHASE_FILE));
+    catch
+        current_phase = 'none';
+    end
+
+    if ~strcmp(current_phase, last_phase)
+        last_phase = current_phase;
+
+        if strcmp(current_phase, 'medium') && ~phase_marked_medium
+            phase_medium_t = t_now;
+            phase_marked_medium = true;
+            xm1 = xline(ax1, phase_medium_t, '-', 'Color', [0.85 0.33 0.10], ...
+                        'LineWidth', 1.8, 'Label', 'Medium congestion');
+            xm1.Annotation.LegendInformation.IconDisplayStyle = 'off';
+            xm2 = xline(ax2, phase_medium_t, '-', 'Color', [0.85 0.33 0.10], 'LineWidth', 1.8);
+            xm2.Annotation.LegendInformation.IconDisplayStyle = 'off';
+            fprintf('\n[PHASE] Medium congestion started at t=%.1fs\n\n', phase_medium_t);
+
+        elseif strcmp(current_phase, 'heavy') && ~phase_marked_heavy
+            phase_heavy_t = t_now;
+            phase_marked_heavy = true;
+            xh1 = xline(ax1, phase_heavy_t, '-', 'Color', [0.64 0.08 0.18], ...
+                        'LineWidth', 1.8, 'Label', 'Heavy congestion');
+            xh1.Annotation.LegendInformation.IconDisplayStyle = 'off';
+            xh2 = xline(ax2, phase_heavy_t, '-', 'Color', [0.64 0.08 0.18], 'LineWidth', 1.8);
+            xh2.Annotation.LegendInformation.IconDisplayStyle = 'off';
+            fprintf('\n[PHASE] Heavy congestion started at t=%.1fs\n\n', phase_heavy_t);
+        end
     end
 
     % Draw rerouting markers
@@ -329,15 +355,6 @@ end
 %% =========================================================
 %% HELPER FUNCTIONS
 %% =========================================================
-
-function mark_congestion_start()
-% Call this from the MATLAB command window the moment you
-% start iperf in Mininet. It marks the congestion start time
-% on the plot with a blue vertical line.
-    assignin('base', 'congestion_time', ...
-             posixtime(datetime('now')) - evalin('base','t_start'));
-    fprintf('[INFO] Congestion marker set.\n');
-end
 
 function ok = onos_set_port(base, device_id, port, enabled, opts)
     try
