@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>NMP Network Monitor</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family: sans-serif; background: #0f0f0f; color: #eee; padding: 2rem; margin: 0; }
+    h1 { font-size: 1rem; color: #666; margin-bottom: 1.5rem; letter-spacing: 0.05em; text-transform: uppercase; }
+    .cards { display: flex; gap: 1rem; margin-bottom: 2rem; }
+    .card { background: #1a1a1a; border-radius: 8px; padding: 1rem 1.5rem; flex: 1; }
+    .label { font-size: 11px; color: #555; text-transform: uppercase; letter-spacing: 0.08em; }
+    .value { font-size: 2rem; font-weight: 500; margin-top: 6px; }
+    .good    { color: #4ade80; }
+    .warn    { color: #facc15; }
+    .bad     { color: #f87171; }
+    .neutral { color: #888; }
+    .threshold-line { font-size: 11px; color: #444; margin-top: 4px; }
+    .chart-wrap { background: #1a1a1a; border-radius: 8px; padding: 1.5rem; }
+  </style>
+</head>
+<body>
+  <h1>NMP Network Monitor — real-time QoS</h1>
+
+  <div class="cards">
+    <div class="card">
+      <div class="label">Latency</div>
+      <div class="value neutral" id="lat">— ms</div>
+      <div class="threshold-line">threshold: 40 ms</div>
+    </div>
+    <div class="card">
+      <div class="label">Jitter</div>
+      <div class="value neutral" id="jit">— ms</div>
+      <div class="threshold-line">threshold: 10 ms</div>
+    </div>
+    <div class="card">
+      <div class="label">Packet loss</div>
+      <div class="value neutral" id="loss">—</div>
+      <div class="threshold-line">threshold: 2%</div>
+    </div>
+    <div class="card">
+      <div class="label">Packets sent</div>
+      <div class="value neutral" id="seq">—</div>
+      <div class="threshold-line">&nbsp;</div>
+    </div>
+  </div>
+
+  <div class="chart-wrap">
+    <canvas id="chart" height="80"></canvas>
+  </div>
+
+<script>
+const latData = [], jitData = [], labels = [];
+
+const chart = new Chart(document.getElementById("chart").getContext("2d"), {
+  type: "line",
+  data: {
+    labels,
+    datasets: [
+      {
+        label: "Latency (ms)",
+        data: latData,
+        borderColor: "#4ade80",
+        borderWidth: 1.5,
+        tension: 0.3,
+        pointRadius: 0,
+        fill: false
+      },
+      {
+        label: "Jitter (ms)",
+        data: jitData,
+        borderColor: "#facc15",
+        borderWidth: 1.5,
+        tension: 0.3,
+        pointRadius: 0,
+        fill: false
+      }
+    ]
+  },
+  options: {
+    animation: false,
+    interaction: { mode: "index", intersect: false },
+    scales: {
+      x: {
+        ticks: { color: "#444", maxTicksLimit: 10 },
+        grid:  { color: "#222" }
+      },
+      y: {
+        ticks: { color: "#444" },
+        grid:  { color: "#222" },
+        min: 0,
+        title: { display: true, text: "ms", color: "#444" }
+      }
+    },
+    plugins: {
+      legend: { labels: { color: "#888", boxWidth: 12 } },
+      tooltip: { backgroundColor: "#222", titleColor: "#aaa", bodyColor: "#eee" }
+    }
+  }
+});
+
+function colorClass(val, warn, bad) {
+  if (val === null || val === undefined) return "neutral";
+  return val < warn ? "good" : val < bad ? "warn" : "bad";
+}
+
+async function poll() {
+  try {
+    const r = await fetch("/metrics");
+    const { latest: m, history } = await r.json();
+
+    if (!m || (m.seq === undefined)) { setTimeout(poll, 1000); return; }
+
+    const lat  = m.latency_ms;
+    const jit  = m.jitter_ms;
+    const lost = m.lost;
+
+    document.getElementById("lat").textContent  = lat != null ? `${lat.toFixed(1)} ms` : "LOST";
+    document.getElementById("jit").textContent  = jit != null ? `${jit.toFixed(1)} ms` : "—";
+    document.getElementById("loss").textContent = lost ? "LOST" : "OK";
+    document.getElementById("seq").textContent  = (m.seq + 1) ?? "—";
+
+    document.getElementById("lat").className  = "value " + colorClass(lat, 20, 40);
+    document.getElementById("jit").className  = "value " + colorClass(jit, 5, 10);
+    document.getElementById("loss").className = "value " + (lost ? "bad" : "good");
+
+    latData.length = 0;
+    jitData.length = 0;
+    labels.length  = 0;
+
+    history.forEach(h => {
+      labels.push(new Date(h.timestamp * 1000).toLocaleTimeString());
+      latData.push(h.latency_ms);
+      jitData.push(h.jitter_ms);
+    });
+
+    chart.update();
+
+  } catch(e) {}
+
+  setTimeout(poll, 1000);
+}
+
+poll();
+</script>
+</body>
+</html>
