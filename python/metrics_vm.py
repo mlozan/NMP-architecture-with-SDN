@@ -1,7 +1,7 @@
 import time
 from socket import *
 
-MATLAB_IP = "192.168.56.1"   # Host machine IP (where MATLAB runs)
+MATLAB_IP = "192.168.56.101"   # Host machine IP (where MATLAB runs)
 PORT = 5006
 LOG_FILE = "/tmp/metrics.txt"
 
