@@ -130,36 +130,50 @@ log_phase_medium = [];   % t of medium congestion start (repeated per sample)
 log_phase_heavy  = [];   % t of heavy congestion start (repeated per sample)
 
 %% =========================================================
-%% FIGURE SETUP — 2 subplots
+%% FIGURE SETUP — 3 subplots
 %% =========================================================
-fig = figure('Name', sprintf('QoE Monitor — %s — %s', SONG_NAME, exp_label), ...
+% --- General figure title ---
+fig_title = sprintf('Experiment 1 - No rerouting (baseline)  |  %s  |  L_{max} = %.1f ms', ...
+                    SONG_NAME, L_max);
+
+fig = figure('Name', fig_title, ...
              'NumberTitle', 'off', ...
-             'Position', [50 50 1100 750]);
+             'Position', [50 50 1100 900]);
+
+% Super title (general title for all subplots)
+sgtitle(fig_title, 'FontSize', 13, 'FontWeight', 'bold');
 
 % --- Subplot 1: QoE over time ---
-ax1 = subplot(2,1,1);
+ax1 = subplot(3,1,1);
 h_qoe    = animatedline(ax1, 'Color', [0.13 0.55 0.13], 'LineWidth', 2);
 h_thresh = yline(ax1, QOE_THRESHOLD, '--r', 'LineWidth', 1.5, ...
                  'Label', sprintf('Threshold (%.2f)', QOE_THRESHOLD));
 ylim(ax1, [0 1.05]);
 ylabel(ax1, 'QoE');
-title(ax1, sprintf('%s  |  Song: %s  |  L_{max} = %.1f ms', ...
-      exp_label, SONG_NAME, L_max));
+title(ax1, 'Quality of Experience');
 grid(ax1, 'on');
 legend(ax1, 'QoE', 'Threshold', 'Location', 'southwest');
 
-% --- Subplot 2: Delay / Jitter / Loss ---
-ax2 = subplot(2,1,2);
+% --- Subplot 2: Delay / Jitter ---
+ax2 = subplot(3,1,2);
 h_delay  = animatedline(ax2, 'Color', [0.00 0.45 0.74], ...
                         'LineWidth', 1.5, 'DisplayName', 'Delay (ms)');
 h_jitter = animatedline(ax2, 'Color', [0.85 0.33 0.10], ...
                         'LineWidth', 1.5, 'DisplayName', 'Jitter (ms)');
-h_loss   = animatedline(ax2, 'Color', [0.49 0.18 0.56], ...
-                        'LineWidth', 1.5, 'DisplayName', 'Loss (%)');
-ylabel(ax2, 'ms  /  %');
-title(ax2, 'Network Metrics — Delay / Jitter / Loss');
+ylabel(ax2, 'ms');
+title(ax2, 'Network Metrics');
 grid(ax2, 'on');
 legend(ax2, 'Location', 'northwest');
+
+% --- Subplot 3: Packet Loss ---
+ax3 = subplot(3,1,3);
+h_loss = animatedline(ax3, 'Color', [0.49 0.18 0.56], ...
+                      'LineWidth', 1.5, 'DisplayName', 'Packet Loss (%)');
+ylabel(ax3, '%');
+xlabel(ax3, 'Time (s)');
+title(ax3, 'Packet Loss');
+grid(ax3, 'on');
+legend(ax3, 'Location', 'northwest');
 
 
 
@@ -249,8 +263,10 @@ while true
 
     addpoints(h_delay,  t_now, delay_ms);
     addpoints(h_jitter, t_now, jitter_ms);
-    addpoints(h_loss,   t_now, loss_frac * 100);
     xlim(ax2, [max(0, t_now - PLOT_WINDOW), max(PLOT_WINDOW, t_now)]);
+
+    addpoints(h_loss, t_now, loss_frac * 100);
+    xlim(ax3, [max(0, t_now - PLOT_WINDOW), max(PLOT_WINDOW, t_now)]);
 
     %% --- Read phase signal file (written by experiment script) ---
     try
@@ -263,33 +279,32 @@ while true
         last_phase = current_phase;
 
         if strcmp(current_phase, 'medium') && ~phase_marked_medium
-            phase_medium_t = t_now;
+            phase_medium_t      = t_now;
             phase_marked_medium = true;
-            xm1 = xline(ax1, phase_medium_t, '-', 'Color', [0.85 0.33 0.10], ...
-                        'LineWidth', 1.8, 'Label', 'Medium congestion');
-            xm1.Annotation.LegendInformation.IconDisplayStyle = 'off';
-            xm2 = xline(ax2, phase_medium_t, '-', 'Color', [0.85 0.33 0.10], 'LineWidth', 1.8);
-            xm2.Annotation.LegendInformation.IconDisplayStyle = 'off';
+            col_m = [0.85 0.33 0.10];
+            xline(ax1, phase_medium_t, '-', 'Color', col_m, 'LineWidth', 1.8, ...
+                  'Label', 'Medium congestion', 'LabelVerticalAlignment', 'bottom');
+            xline(ax2, phase_medium_t, '-', 'Color', col_m, 'LineWidth', 1.8);
+            xline(ax3, phase_medium_t, '-', 'Color', col_m, 'LineWidth', 1.8);
             fprintf('\n[PHASE] Medium congestion started at t=%.1fs\n\n', phase_medium_t);
 
         elseif strcmp(current_phase, 'heavy') && ~phase_marked_heavy
-            phase_heavy_t = t_now;
+            phase_heavy_t      = t_now;
             phase_marked_heavy = true;
-            xh1 = xline(ax1, phase_heavy_t, '-', 'Color', [0.64 0.08 0.18], ...
-                        'LineWidth', 1.8, 'Label', 'Heavy congestion');
-            xh1.Annotation.LegendInformation.IconDisplayStyle = 'off';
-            xh2 = xline(ax2, phase_heavy_t, '-', 'Color', [0.64 0.08 0.18], 'LineWidth', 1.8);
-            xh2.Annotation.LegendInformation.IconDisplayStyle = 'off';
+            col_h = [0.64 0.08 0.18];
+            xline(ax1, phase_heavy_t, '-', 'Color', col_h, 'LineWidth', 1.8, ...
+                  'Label', 'Heavy congestion', 'LabelVerticalAlignment', 'bottom');
+            xline(ax2, phase_heavy_t, '-', 'Color', col_h, 'LineWidth', 1.8);
+            xline(ax3, phase_heavy_t, '-', 'Color', col_h, 'LineWidth', 1.8);
             fprintf('\n[PHASE] Heavy congestion started at t=%.1fs\n\n', phase_heavy_t);
         end
     end
 
     % Draw rerouting markers
     if ~isempty(reroute_times)
-        xl1 = xline(ax1, reroute_times(end), '--k', 'Alpha', 0.4);
-        xl1.Annotation.LegendInformation.IconDisplayStyle = 'off';
-        xl2 = xline(ax2, reroute_times(end), '--k', 'Alpha', 0.4);
-        xl2.Annotation.LegendInformation.IconDisplayStyle = 'off';
+        xline(ax1, reroute_times(end), '--k', 'Alpha', 0.4, 'Label', 'Rerouting');
+        xline(ax2, reroute_times(end), '--k', 'Alpha', 0.4);
+        xline(ax3, reroute_times(end), '--k', 'Alpha', 0.4);
     end
 
     drawnow limitrate;
