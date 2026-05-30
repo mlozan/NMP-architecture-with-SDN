@@ -166,6 +166,14 @@ u = udpport('datagram', 'IPv4', 'LocalPort', UDP_PORT);
 fprintf('Listening for UDP metrics on port %d...\n\n', UDP_PORT);
 fprintf('Phase markers are detected automatically from /tmp/phase.txt\n\n');
 
+% --- Data log arrays ---
+log_t      = [];
+log_delay  = [];
+log_jitter = [];
+log_loss   = [];
+log_D      = [];
+log_qoe    = [];
+
 path_degraded = false;
 last_reroute  = -Inf;
 iter          = 0;
@@ -202,6 +210,14 @@ while true
     %% --- Compute D and QoE ---
     D   = delay_ms + jitter_ms + 200 * loss_frac;
     QoE = max(0, 1 - D / L_max);
+
+    % --- Log data ---
+    log_t(end+1)      = t_now;
+    log_delay(end+1)  = delay_ms;
+    log_jitter(end+1) = jitter_ms;
+    log_loss(end+1)   = loss_frac;
+    log_D(end+1)      = D;
+    log_qoe(end+1)    = QoE;
 
     active_path = 'A';
     if path_degraded, active_path = 'B'; end
@@ -266,6 +282,41 @@ while true
         end
     end
 end
+
+%% =========================================================
+%% ANALYSIS — run these lines in the command window after Ctrl+C
+%% =========================================================
+%
+% 1) Fix axes to show full experiment and export figure:
+%
+%    xlim(ax1, [0, max(log_t)]);
+%    xlim(ax2, [0, max(log_t)]);
+%    xlim(ax3, [0, max(log_t)]);
+%    song_safe = strrep(SONG_NAME, ' ', '_');
+%    exportgraphics(fig, sprintf('exp1_%s.png', song_safe), 'Resolution', 300);
+%
+% 2) Export data to Excel:
+%
+%    T = table(log_t', log_delay', log_jitter', log_loss'*100, log_D', log_qoe', ...
+%              'VariableNames', {'Time_s','Delay_ms','Jitter_ms','Loss_pct','D_ms','QoE'});
+%    writetable(T, sprintf('exp1_%s.xlsx', strrep(SONG_NAME,' ','_')));
+%
+% 3) Print phase stats (adjust t boundaries to match your actual experiment):
+%
+%    t1 = log_t < 60;
+%    t2 = log_t >= 60  & log_t < 120;
+%    t3 = log_t >= 120;
+%    phases = {t1, t2, t3};
+%    names  = {'Baseline (0-60s)', 'Medium (60-120s)', 'Heavy (120-180s)'};
+%    for i = 1:3
+%        p = phases{i};
+%        fprintf('\n--- %s ---\n', names{i});
+%        fprintf('  QoE mean:     %.3f\n',  mean(log_qoe(p)));
+%        fprintf('  QoE min:      %.3f\n',  min(log_qoe(p)));
+%        fprintf('  Delay mean:   %.2f ms\n', mean(log_delay(p)));
+%        fprintf('  Jitter mean:  %.2f ms\n', mean(log_jitter(p)));
+%        fprintf('  Loss mean:    %.1f %%\n', mean(log_loss(p)*100));
+%    end
 
 %% =========================================================
 %% HELPER FUNCTIONS
