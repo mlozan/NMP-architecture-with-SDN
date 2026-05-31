@@ -93,21 +93,9 @@ fprintf(' UDP port:      %d\n', UDP_PORT);
 fprintf('============================================\n\n');
 
 %% =========================================================
-%% ONOS REST OPTIONS
+%% ONOS — rerouting is handled by update_qoe_path.py (called via system())
+%% No direct REST calls from MATLAB needed.
 %% =========================================================
-opts_get = weboptions( ...
-    'Username',      ONOS_USER, ...
-    'Password',      ONOS_PASS, ...
-    'MediaType',     'application/json', ...
-    'RequestMethod', 'get', ...
-    'Timeout',       5);
-
-opts_post = weboptions( ...
-    'Username',      ONOS_USER, ...
-    'Password',      ONOS_PASS, ...
-    'MediaType',     'application/json', ...
-    'RequestMethod', 'post', ...
-    'Timeout',       5);
 
 %% =========================================================
 %% FIGURE SETUP — 3 subplots
@@ -253,30 +241,28 @@ while true
     if REROUTING_ENABLED
         if QoE < QOE_THRESHOLD && cooldown_ok
             if ~path_degraded
-                fprintf('\n>>> QoE=%.3f < %.3f — Switching to Path B ', ...
+                fprintf('\n>>> QoE=%.3f < %.3f — Switching QoE flow to Path B...\n', ...
                         QoE, QOE_THRESHOLD);
-                fprintf('(disabling port %s on %s)...\n', PORT_PATH_A, S1_ID);
-                ok = onos_set_port(ONOS_BASE, S1_ID, PORT_PATH_A, false, opts_post);
-                if ok
-                    flush_flows(ONOS_BASE, ONOS_USER, ONOS_PASS, opts_get);
+                % Switch only DSCP=46 (QoE) to Path B — iperf DSCP=0 stays on Path A
+                ret = system('python3 update_qoe_path.py --path B');
+                if ret == 0
                     path_degraded = true;
                     last_reroute  = now_unix;
                     reroute_times(end+1) = t_now; %#ok<AGROW>
-                    fprintf('>>> Path B active. Flows flushed — ONOS recomputing...\n\n');
+                    fprintf('>>> QoE flow → Path B. iperf stays on Path A.\n\n');
                 else
-                    fprintf('[ERROR] Could not disable port. Retrying next cycle.\n\n');
+                    fprintf('[ERROR] update_qoe_path.py failed. Retrying next cycle.\n\n');
                 end
             else
                 fprintf('\n>>> QoE=%.3f still low on Path B — restoring Path A...\n', QoE);
-                ok = onos_set_port(ONOS_BASE, S1_ID, PORT_PATH_A, true, opts_post);
-                if ok
-                    flush_flows(ONOS_BASE, ONOS_USER, ONOS_PASS, opts_get);
+                ret = system('python3 update_qoe_path.py --path A');
+                if ret == 0
                     path_degraded = false;
                     last_reroute  = now_unix;
                     reroute_times(end+1) = t_now; %#ok<AGROW>
-                    fprintf('>>> Path A restored. Flows flushed — ONOS recomputing...\n\n');
+                    fprintf('>>> QoE flow → Path A restored.\n\n');
                 else
-                    fprintf('[ERROR] Could not re-enable port.\n\n');
+                    fprintf('[ERROR] update_qoe_path.py failed.\n\n');
                 end
             end
         end
@@ -321,28 +307,6 @@ end
 %% =========================================================
 %% HELPER FUNCTIONS
 %% =========================================================
-
-function ok = onos_set_port(base, device_id, port, enabled, opts)
-    try
-        url = sprintf('%s/devices/%s/portstate/%s', base, device_id, port);
-        webwrite(url, struct('enabled', enabled), opts);
-        ok = true;
-    catch e
-        fprintf('[ERROR] onos_set_port: %s\n', e.message);
-        ok = false;
-    end
-end
-
-function flush_flows(base, user, pass, ~)
-    try
-        dev_id = 'of:0000000000000001';
-        system(sprintf('curl -s -u %s:%s -X DELETE %s/flows/%s', ...
-                       user, pass, base, dev_id));
-        fprintf('   Flows deleted: %s\n', dev_id);
-    catch e
-        fprintf('[ERROR] flush_flows: %s\n', e.message);
-    end
-end
 
 function lbl = qoe_label(q)
     if     q >= 0.8,  lbl = 'Excellent';
