@@ -26,13 +26,13 @@ PHASE_RECOVERY_S = 60
 PHASE_CLEAN_S    = 30
 
 # Path A impairment
-MEDIUM_DELAY_MS  = 20
-MEDIUM_JITTER_MS = 5
-MEDIUM_LOSS_PCT  = 2
+MEDIUM_DELAY_MS  = 5
+MEDIUM_JITTER_MS = 1
+MEDIUM_LOSS_PCT  = 0
 
-HEAVY_DELAY_MS   = 50
-HEAVY_JITTER_MS  = 10
-HEAVY_LOSS_PCT   = 15
+HEAVY_DELAY_MS   = 15
+HEAVY_JITTER_MS  = 3
+HEAVY_LOSS_PCT   = 5
 
 # Path B impairment — very light, always present from phase 2 onwards
 PATHB_DELAY_MS   = 3
