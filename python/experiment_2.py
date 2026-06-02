@@ -22,8 +22,7 @@ import time
 PHASE_BASELINE_S = 30
 PHASE_MEDIUM_S   = 60
 PHASE_HEAVY_S    = 30
-PHASE_RECOVERY_S = 60
-PHASE_CLEAN_S    = 30
+PHASE_RECOVERY_S = 30   # same as Experiment 1 clean phase
 
 # Path A impairment
 MEDIUM_DELAY_MS  = 5
@@ -95,7 +94,7 @@ def wait(seconds, label):
 
 def main():
     total = PHASE_BASELINE_S + PHASE_MEDIUM_S + PHASE_HEAVY_S + \
-            PHASE_RECOVERY_S + PHASE_CLEAN_S
+            PHASE_RECOVERY_S
 
     with open(LOG_FILE, 'w') as f:
         f.write(f'Experiment 2 — WITH rerouting\n')
@@ -108,8 +107,7 @@ def main():
     log(f'  Phase 1 Baseline:   {PHASE_BASELINE_S}s — no impairment')
     log(f'  Phase 2 Medium:     {PHASE_MEDIUM_S}s  — A:{MEDIUM_DELAY_MS}ms {MEDIUM_LOSS_PCT}%  B:{PATHB_DELAY_MS}ms {PATHB_LOSS_PCT}%')
     log(f'  Phase 3 Heavy:      {PHASE_HEAVY_S}s  — A:{HEAVY_DELAY_MS}ms {HEAVY_LOSS_PCT}%  B:{PATHB_DELAY_MS}ms {PATHB_LOSS_PCT}%')
-    log(f'  Phase 4 Recovery:   {PHASE_RECOVERY_S}s — A:clean  B:{PATHB_DELAY_MS}ms {PATHB_LOSS_PCT}%')
-    log(f'  Phase 5 Clean:      {PHASE_CLEAN_S}s  — both clean')
+    log(f'  Phase 4 Recovery:   {PHASE_RECOVERY_S}s — A:clean  B:{PATHB_DELAY_MS}ms {PATHB_LOSS_PCT}% — MATLAB reroutes — QoE recovers')
     log(f'  Total: {total}s')
     log('')
 
@@ -153,25 +151,17 @@ def main():
     # Path B stays the same — no need to re-apply
     wait(PHASE_HEAVY_S, 'Heavy')
 
-    # ── Phase 4: Clear A + Light B ─────────────────────────────────────────
+    # ── Phase 4: Clear A + Light B (same duration as Exp1 clean phase) ──────
     log('')
     log('=' * 62)
     log(f'[PHASE 4] Path A cleared + Light Path B — {PHASE_RECOVERY_S}s')
     log(f'  Path A: clean  |  Path B: {PATHB_DELAY_MS}ms {PATHB_LOSS_PCT}%')
-    log('  QoE recovers on Path B')
-    log('=' * 62)
-    clear_netem(pid, S1_IFACE_A)
-    wait(PHASE_RECOVERY_S, 'Recovery')
-
-    # ── Phase 5: Full clean ────────────────────────────────────────────────
-    log('')
-    log('=' * 62)
-    log(f'[PHASE 5] Full recovery — {PHASE_CLEAN_S}s — both paths clean')
-    log('  QoE returns to ~1.0 (Excellent)')
+    log('  MATLAB reroutes to Path B — QoE recovers')
+    log('  Same duration as Experiment 1 Phase 4 for direct comparison')
     log('=' * 62)
     clear_netem(pid, S1_IFACE_A)
     clear_netem(pid, S1_IFACE_B)
-    wait(PHASE_CLEAN_S, 'Clean')
+    wait(PHASE_RECOVERY_S, 'Recovery')
 
     log('')
     log('=' * 62)
