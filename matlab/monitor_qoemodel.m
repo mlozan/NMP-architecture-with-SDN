@@ -91,4 +91,8 @@ fprintf('\nSelected song: %s  (RC=%.3f, SE=%.3f, ED=%.3f)\n\n', ...
 %   RC_MIN = 2.9364 (Bolero, SH)    RC_MAX = 6.8903 (Master Blaster, CC)
 %   SE_MIN = 0.731  (Clarinet)      SE_MAX = 0.936  (Drums)
 %
+<<<<<<< HEAD
 % L_max pe
+=======
+% L_max pe
+>>>>>>> 2de79cd632651a90c0402fe84db9baa8a1feaec8
