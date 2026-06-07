@@ -3,7 +3,7 @@ from mininet.link import TCLink
 
 class QoETopo(Topo):
     def build(self):
-        # --- Priority hosts (h1 -> h2 is the monitored QoE flow) ---
+        # --- Hosts (h1 -> h2 is the monitored QoE flow) ---
         h1 = self.addHost('h1', ip='10.0.0.1/24')
         h2 = self.addHost('h2', ip='10.0.0.2/24')
 
