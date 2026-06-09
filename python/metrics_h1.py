@@ -35,14 +35,17 @@ while True:
         loss   = 1.0
         print(f"[metrics_h1] No replies — using fallback values")
     else:
-        delay = sum(rtt_values) / len(rtt_values)
+        # One-way delay approximated as RTT / 2
+        delay = (sum(rtt_values) / len(rtt_values)) / 2
+
         if len(rtt_values) > 1:
             diffs = [abs(rtt_values[i+1] - rtt_values[i])
                      for i in range(len(rtt_values) - 1)]
             # Median is robust against outlier spikes
-            jitter = statistics.median(diffs)
+            jitter = statistics.median(diffs) / 2
         else:
             jitter = 0.0
+
         loss = round((PING_COUNT - len(rtt_values)) / PING_COUNT, 2)
 
     # Atomic write: write to temp file then rename to avoid race conditions
