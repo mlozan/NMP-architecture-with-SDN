@@ -8,7 +8,7 @@ clc; clear; close all;
 % --- Experiment mode ---
 % false = Experiment 1 (baseline, no rerouting)
 % true  = Experiment 2 (rerouting active)
-REROUTING_ENABLED = true;
+REROUTING_ENABLED = false;
 
 % --- Network ---
 UDP_PORT      = 5006;
@@ -124,13 +124,6 @@ fprintf('============================================\n\n');
 %% =========================================================
 %% ONOS REST OPTIONS
 %% =========================================================
-opts_get = weboptions( ...
-    'Username',      ONOS_USER, ...
-    'Password',      ONOS_PASS, ...
-    'MediaType',     'application/json', ...
-    'RequestMethod', 'get', ...
-    'Timeout',       5);
-
 opts_post = weboptions( ...
     'Username',      ONOS_USER, ...
     'Password',      ONOS_PASS, ...
@@ -349,8 +342,9 @@ end
 function lbl = qoe_label(q)
     if     q >= 0.8,  lbl = 'Excellent';
     elseif q >= 0.6,  lbl = 'Good';
-    elseif q >= 0.4,  lbl = 'Fair';
+    elseif q >= 0.4,  lbl = 'Degraded';
     elseif q >  0,    lbl = 'Poor';
     else,             lbl = 'Unacceptable';
     end
+
 end
