@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-experiment1_no_rerouting.py
+experiment_1.py
 ============================
 Experiment 1 — Baseline: QoE degradation WITHOUT rerouting.
 
